@@ -1,26 +1,35 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ANATOMY_CATALOG, VISUALIZATION_MODES } from "../data/anatomyCatalog.ts";
+import { SPACESUIT_CATALOG } from "../data/spacesuitCatalog.ts";
 import {
   createInitialSimulationState,
   getFilteredStructures,
+  getFilteredSuitComponents,
   getSelectedStructure,
+  getSelectedSuitComponent,
   isStructureDimmed,
   isStructureHiddenByIsolation,
+  isSuitComponentDimmed,
+  isSuitComponentHiddenByIsolation,
   restoreCompleteBody,
   selectOrgan,
+  selectSuitComponent,
   setAnimationMode,
   setBodySystemFilter,
+  setExplodeProgress,
   setThermalIntensity,
   setVisualizationIntensity,
   setVisualizationMode,
   toggleIsolateOrgan,
+  toggleSuitMode,
 } from "./simulationState.ts";
 
 describe("simulationState", () => {
-  it("contains all 14 required anatomical structures and 7 visualization modes", () => {
+  it("contains all 14 required anatomical structures, 9 visualization modes, and 22 spacesuit components", () => {
     assert.equal(ANATOMY_CATALOG.length, 14);
-    assert.equal(VISUALIZATION_MODES.length, 7);
+    assert.equal(VISUALIZATION_MODES.length, 9);
+    assert.equal(SPACESUIT_CATALOG.length, 22);
 
     const requiredNames = [
       "Brain",
@@ -44,6 +53,37 @@ describe("simulationState", () => {
         `Missing required structure: ${name}`,
       );
     }
+
+    const requiredSuitNames = [
+      "Helmet Assembly",
+      "Helmet Visor",
+      "Communication System",
+      "Chest Display",
+      "Primary Life Support System",
+      "Oxygen Supply",
+      "CO2 Removal System",
+      "Cooling System",
+      "Pressure Regulation",
+      "Electrical Power",
+      "Shoulder Joints",
+      "Elbow Joints",
+      "Wrist Bearings",
+      "Gloves",
+      "Waist Assembly",
+      "Hip Joints",
+      "Knee Joints",
+      "Leg Assemblies",
+      "Boots",
+      "Thermal Protection Layers",
+      "Pressure Bladder",
+      "Emergency Oxygen System",
+    ];
+    for (const name of requiredSuitNames) {
+      assert.ok(
+        SPACESUIT_CATALOG.some((s) => s.name === name),
+        `Missing required suit component: ${name}`,
+      );
+    }
   });
 
   it("handles selection, dimming, isolation, and complete body restoration", () => {
@@ -51,30 +91,25 @@ describe("simulationState", () => {
     assert.equal(state.selectedOrganId, null);
     assert.equal(isStructureDimmed(state, "heart"), false);
 
-    // Cannot isolate without an organ selected
     state = toggleIsolateOrgan(state);
     assert.equal(state.isolated, false);
 
-    // Select heart -> other structures dim, not hidden until isolated
     state = selectOrgan(state, "heart");
     assert.equal(getSelectedStructure(state)?.name, "Heart");
     assert.equal(isStructureDimmed(state, "heart"), false);
     assert.equal(isStructureDimmed(state, "brain"), true);
     assert.equal(isStructureHiddenByIsolation(state, "brain"), false);
 
-    // Isolate heart -> non-heart structures hidden
     state = toggleIsolateOrgan(state);
     assert.equal(state.isolated, true);
     assert.equal(isStructureHiddenByIsolation(state, "heart"), false);
     assert.equal(isStructureHiddenByIsolation(state, "brain"), true);
 
-    // Restore complete body -> isolated resets while keeping selection available
     state = restoreCompleteBody(state);
     assert.equal(state.isolated, false);
     assert.equal(isStructureHiddenByIsolation(state, "brain"), false);
     assert.equal(state.selectedOrganId, "heart");
 
-    // Clear selection clears isolation too
     state = toggleIsolateOrgan(state);
     state = selectOrgan(state, null);
     assert.equal(state.isolated, false);
@@ -97,7 +132,43 @@ describe("simulationState", () => {
     assert.equal(isStructureHiddenByIsolation(state, "stomach"), true);
   });
 
-  it("filters directory by body system and updates modes/intensities safely", () => {
+  it("handles Astronaut Spacesuit transformation, exploded view, and component isolation", () => {
+    let state = createInitialSimulationState();
+    state = setBodySystemFilter(state, "digestive");
+    assert.equal(state.suitActive, false);
+
+    // Activate suit while keeping intensities and camera preset
+    state = setThermalIntensity(state, 1.35);
+    state = toggleSuitMode(state, true);
+    assert.equal(state.suitActive, true);
+    assert.equal(state.thermalIntensity, 1.35);
+
+    // Explode slider clamping
+    state = setExplodeProgress(state, 1.4);
+    assert.equal(state.explodeProgress, 1.0);
+
+    // Select PLSS and isolate -> keeps internal O2/CO2/cooling visible
+    state = selectSuitComponent(state, "plss");
+    assert.equal(getSelectedSuitComponent(state)?.name, "Primary Life Support System");
+    assert.equal(isSuitComponentDimmed(state, "boots"), true);
+    state = toggleIsolateOrgan(state);
+    assert.equal(isSuitComponentHiddenByIsolation(state, "oxygen_supply"), false);
+    assert.equal(isSuitComponentHiddenByIsolation(state, "boots"), true);
+
+    // Restore resets explodeProgress & isolation
+    state = restoreCompleteBody(state);
+    assert.equal(state.explodeProgress, 0);
+    assert.equal(state.isolated, false);
+
+    // Switching back from Engineering Mode falls back cleanly to Holographic while preserving human anatomy
+    state = setVisualizationMode(state, "engineering");
+    assert.equal(state.suitActive, true);
+    state = toggleSuitMode(state, false);
+    assert.equal(state.suitActive, false);
+    assert.equal(state.mode, "holographic");
+  });
+
+  it("filters directories and updates modes/intensities safely", () => {
     let state = createInitialSimulationState();
     state = setBodySystemFilter(state, "digestive");
     const digestive = getFilteredStructures(state.systemFilter);
@@ -105,6 +176,9 @@ describe("simulationState", () => {
       digestive.map((d) => d.id),
       ["liver", "stomach", "pancreas", "small_intestine", "large_intestine"],
     );
+
+    const lss = getFilteredSuitComponents("life_support");
+    assert.equal(lss.length, 6);
 
     state = setVisualizationMode(state, "thermal");
     assert.equal(state.mode, "thermal");

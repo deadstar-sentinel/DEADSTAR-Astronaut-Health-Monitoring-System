@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PanelLeft, PanelRight, RotateCcw } from "lucide-react";
+import { Activity, PanelLeft, PanelRight, RotateCcw } from "lucide-react";
 import type {
   AnatomyId,
   AnimationMode,
@@ -7,16 +7,29 @@ import type {
   CameraPresetId,
   VisualizationMode,
 } from "./data/anatomyCatalog.ts";
+import type { SuitComponentId, SuitSubsystemId } from "./data/spacesuitCatalog.ts";
+import {
+  buildTelemetrySnapshot,
+  type SuitAlert,
+  type SuitScenarioId,
+  type SuitTelemetrySnapshot,
+} from "./utils/telemetryEngine.ts";
 import {
   createInitialSimulationState,
   restoreCompleteBody,
   selectOrgan,
+  selectSuitComponent,
   setAnimationMode,
   setBodySystemFilter,
+  setExplodeProgress,
+  setMonitoringDashboardOpen,
+  setSuitScenario,
+  setSuitSubsystemFilter,
   setThermalIntensity,
   setVisualizationIntensity,
   setVisualizationMode,
   toggleIsolateOrgan,
+  toggleSuitMode,
   type DisplaySettings,
   type SimulationState,
 } from "./utils/simulationState.ts";
@@ -24,12 +37,34 @@ import { AnatomyViewport, type AnatomyViewportHandle } from "./components/Anatom
 import { LeftControlPanel } from "./components/LeftControlPanel.tsx";
 import { RightInspectorPanel } from "./components/RightInspectorPanel.tsx";
 import { BottomControlBar } from "./components/BottomControlBar.tsx";
+import { SpacesuitTelemetryModal } from "./components/SpacesuitTelemetryModal.tsx";
 
 export default function App() {
   const [state, setState] = useState<SimulationState>(() => createInitialSimulationState());
+  const [telemetrySnapshot, setTelemetrySnapshot] = useState<SuitTelemetrySnapshot>(() =>
+    buildTelemetrySnapshot("nominal", 0),
+  );
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [externalPrompt, setExternalPrompt] = useState<{ id: number; text: string } | null>(null);
   const viewportRef = useRef<AnatomyViewportHandle | null>(null);
+  const telemetryPhaseRef = useRef(0);
+
+  // Sync live simulated telemetry when scenario changes or simulation ticks
+  useEffect(() => {
+    setTelemetrySnapshot(buildTelemetrySnapshot(state.suitScenarioId, telemetryPhaseRef.current));
+  }, [state.suitScenarioId]);
+
+  useEffect(() => {
+    if (!state.suitActive || state.animationMode !== "playing") return;
+    const id = window.setInterval(() => {
+      telemetryPhaseRef.current += 1.25;
+      setTelemetrySnapshot(
+        buildTelemetrySnapshot(state.suitScenarioId, telemetryPhaseRef.current),
+      );
+    }, 1250);
+    return () => window.clearInterval(id);
+  }, [state.suitActive, state.suitScenarioId, state.animationMode]);
 
   const handleSelectOrgan = useCallback((id: AnatomyId | null, focusZoom = true) => {
     setState((prev) => selectOrgan(prev, id));
@@ -40,12 +75,44 @@ export default function App() {
     }
   }, []);
 
+  const handleSelectSuitComponent = useCallback(
+    (id: SuitComponentId | null, focusZoom = true, openHud = false) => {
+      setState((prev) => {
+        let next = selectSuitComponent(prev, id);
+        if (openHud) {
+          next = setMonitoringDashboardOpen(next, true);
+        }
+        return next;
+      });
+      if (id && focusZoom) {
+        viewportRef.current?.focusOnSuitComponent(id, false);
+      } else if (!id) {
+        viewportRef.current?.focusCameraPreset("reset");
+      }
+    },
+    [],
+  );
+
+  const handleToggleSuitMode = useCallback((active: boolean) => {
+    setState((prev) => toggleSuitMode(prev, active));
+  }, []);
+
   const handleSelectMode = useCallback((mode: VisualizationMode) => {
-    setState((prev) => setVisualizationMode(prev, mode));
+    setState((prev) => {
+      let next = setVisualizationMode(prev, mode);
+      if (mode === "ai_monitoring") {
+        next = setMonitoringDashboardOpen(next, true);
+      }
+      return next;
+    });
   }, []);
 
   const handleSelectSystem = useCallback((sys: BodySystemId) => {
     setState((prev) => setBodySystemFilter(prev, sys));
+  }, []);
+
+  const handleSelectSuitSubsystem = useCallback((sub: SuitSubsystemId) => {
+    setState((prev) => setSuitSubsystemFilter(prev, sub));
   }, []);
 
   const handleToggleIsolate = useCallback(() => {
@@ -55,6 +122,10 @@ export default function App() {
   const handleRestoreBody = useCallback(() => {
     setState((prev) => restoreCompleteBody(prev));
     viewportRef.current?.focusCameraPreset("reset");
+  }, []);
+
+  const handleChangeExplodeProgress = useCallback((val: number) => {
+    setState((prev) => setExplodeProgress(prev, val));
   }, []);
 
   const handleCameraPreset = useCallback((preset: CameraPresetId) => {
@@ -81,6 +152,40 @@ export default function App() {
     }));
   }, []);
 
+  const handleSelectScenario = useCallback((scenarioId: SuitScenarioId) => {
+    setState((prev) => setSuitScenario(prev, scenarioId));
+  }, []);
+
+  const handleOpenMonitoringHud = useCallback(() => {
+    setState((prev) => setMonitoringDashboardOpen(prev, true));
+  }, []);
+
+  const handleCloseMonitoringHud = useCallback(() => {
+    setState((prev) => setMonitoringDashboardOpen(prev, false));
+  }, []);
+
+  const handleInspectAlertComponent = useCallback((id: SuitComponentId) => {
+    setState((prev) => {
+      let next = setMonitoringDashboardOpen(prev, false);
+      next = selectSuitComponent(next, id);
+      return next;
+    });
+    viewportRef.current?.focusOnSuitComponent(id, true);
+  }, []);
+
+  const handleAskAiAlert = useCallback((alert: SuitAlert) => {
+    setState((prev) => {
+      let next = setMonitoringDashboardOpen(prev, false);
+      next = selectSuitComponent(next, alert.componentId);
+      return next;
+    });
+    setExternalPrompt({
+      id: Date.now(),
+      text: `Why did "${alert.title}" trigger and how does it affect ${alert.componentName}?`,
+    });
+    setRightOpen(true);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -88,7 +193,13 @@ export default function App() {
         return;
       }
       if (e.key === "Escape") {
-        setState((prev) => selectOrgan(prev, null));
+        setState((prev) => {
+          if (prev.monitoringDashboardOpen) {
+            return setMonitoringDashboardOpen(prev, false);
+          }
+          const clearedOrgan = selectOrgan(prev, null);
+          return selectSuitComponent(clearedOrgan, null);
+        });
         viewportRef.current?.focusCameraPreset("reset");
       } else if (e.key === "r" || e.key === "R") {
         viewportRef.current?.focusCameraPreset("reset");
@@ -116,25 +227,38 @@ export default function App() {
             <h1 className="text-sm font-semibold tracking-[0.16em] uppercase text-white truncate">
               DEADSTAR SENTINEL
             </h1>
-            <span className="hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-400">
-              3D Medical Anatomy Simulation
+            <span className="hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-400 truncate">
+              {state.suitActive
+                ? "AI Anatomy & Smart EVA Spacesuit Platform"
+                : "3D Medical Anatomy Simulation"}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
-          <span className="hidden md:inline text-[10px] font-mono uppercase tracking-[0.12em] text-slate-400">
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="hidden lg:inline text-[10px] font-mono uppercase tracking-[0.12em] text-slate-400">
             Non-Diagnostic Visualization Layer
           </span>
 
-          {state.isolated && (
+          {state.suitActive && (
+            <button
+              type="button"
+              onClick={handleOpenMonitoringHud}
+              className="hidden sm:flex px-2.5 py-1 bg-violet-500/20 border border-violet-400/60 text-[11px] font-mono uppercase text-violet-100 hover:bg-violet-500/30 items-center gap-1"
+            >
+              <Activity className="w-3 h-3" />
+              AI Telemetry
+            </button>
+          )}
+
+          {(state.isolated || state.explodeProgress > 0) && (
             <button
               type="button"
               onClick={handleRestoreBody}
               className="px-2.5 py-1 bg-cyan-500/20 border border-cyan-400 text-[11px] font-mono uppercase text-cyan-100 hover:bg-cyan-500/30 flex items-center gap-1"
             >
               <RotateCcw className="w-3 h-3" />
-              Restore Body
+              {state.suitActive ? "Restore Suit" : "Restore Body"}
             </button>
           )}
 
@@ -149,7 +273,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main 3-Column Medical Simulation Workspace */}
+      {/* Main 3-Column Medical & Astronaut Spacesuit Simulation Workspace */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden">
         <LeftControlPanel
           state={state}
@@ -157,8 +281,13 @@ export default function App() {
           onCloseMobile={() => setLeftOpen(false)}
           onSelectMode={handleSelectMode}
           onSelectSystem={handleSelectSystem}
+          onSelectSuitSubsystem={handleSelectSuitSubsystem}
           onSelectOrgan={(id) => {
             handleSelectOrgan(id, true);
+            setLeftOpen(false);
+          }}
+          onSelectSuitComponent={(id) => {
+            handleSelectSuitComponent(id, true, false);
             setLeftOpen(false);
           }}
           onChangeThermalIntensity={handleChangeThermalIntensity}
@@ -168,25 +297,48 @@ export default function App() {
         <AnatomyViewport
           ref={viewportRef}
           state={state}
+          telemetrySnapshot={telemetrySnapshot}
           onSelectOrgan={handleSelectOrgan}
+          onSelectSuitComponent={handleSelectSuitComponent}
+          onToggleSuitMode={handleToggleSuitMode}
+          onChangeExplodeProgress={handleChangeExplodeProgress}
+          onRestoreSuit={handleRestoreBody}
+          onOpenTelemetryHud={handleOpenMonitoringHud}
         />
 
         <RightInspectorPanel
           state={state}
+          telemetrySnapshot={telemetrySnapshot}
           isOpen={rightOpen}
+          externalPrompt={externalPrompt}
           onCloseMobile={() => setRightOpen(false)}
           onSelectOrgan={(id) => handleSelectOrgan(id, true)}
+          onSelectSuitComponent={(id) => handleSelectSuitComponent(id, true, false)}
           onToggleIsolate={handleToggleIsolate}
           onRestoreBody={handleRestoreBody}
           onFocusOrgan={(id) => viewportRef.current?.focusOnOrgan(id, true)}
+          onFocusSuitComponent={(id) => viewportRef.current?.focusOnSuitComponent(id, true)}
+          onOpenMonitoringHud={handleOpenMonitoringHud}
         />
       </main>
 
       <BottomControlBar
         state={state}
+        telemetrySnapshot={telemetrySnapshot}
         onCameraPreset={handleCameraPreset}
         onChangeIntensity={handleChangeIntensity}
         onChangeAnimationMode={handleChangeAnimationMode}
+        onOpenTelemetryHud={handleOpenMonitoringHud}
+      />
+
+      <SpacesuitTelemetryModal
+        isOpen={state.monitoringDashboardOpen}
+        snapshot={telemetrySnapshot}
+        scenarioId={state.suitScenarioId}
+        onClose={handleCloseMonitoringHud}
+        onSelectScenario={handleSelectScenario}
+        onInspectComponent={handleInspectAlertComponent}
+        onAskAiAlert={handleAskAiAlert}
       />
     </div>
   );

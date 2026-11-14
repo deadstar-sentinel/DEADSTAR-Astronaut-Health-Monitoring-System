@@ -5,7 +5,9 @@ export type VisualizationMode =
   | "muscular"
   | "nervous"
   | "thermal"
-  | "realistic";
+  | "realistic"
+  | "engineering"
+  | "ai_monitoring";
 
 export type BodySystemId =
   | "all"
@@ -118,6 +120,20 @@ export const VISUALIZATION_MODES: VisualizationModeMeta[] = [
     description: "Natural anatomical PBR shading with calibrated medical studio lighting and environment reflections.",
     accentHex: "#38BDF8",
   },
+  {
+    id: "engineering",
+    label: "Engineering Mode",
+    shortLabel: "Engineer",
+    description: "Spacesuit structural CAD view exposing mechanical bearings, fluid umbilical hoses, internal PLSS modules, and pressure layers.",
+    accentHex: "#00E5FF",
+  },
+  {
+    id: "ai_monitoring",
+    label: "AI Monitoring Mode",
+    shortLabel: "AI Monitor",
+    description: "Intelligent spacesuit life-support HUD mode linking chest DCM, PLSS telemetry, active alerts, and 48h predictive forecasts.",
+    accentHex: "#8A5CFF",
+  },
 ];
 
 export const BODY_SYSTEMS: BodySystemMeta[] = [
@@ -141,14 +157,20 @@ export const ANATOMY_CATALOG: AnatomyStructure[] = [
       "Integrates sensory input, coordinates motor output, regulates autonomic homeostasis, and supports cognition, memory, and consciousness.",
     medicalDetails:
       "Comprises folded cerebral hemispheres, cerebellum for balance and fine motor coordination, and brainstem centers governing respiration and heart rate.",
-    keyStructures: ["Cerebral cortex", "Cerebellum", "Brainstem", "Optic tracts"],
+    keyStructures: [
+      "Frontal, parietal, temporal & occipital lobes",
+      "Cortical gyri & Sylvian fissure",
+      "Foliated cerebellum",
+      "Corpus callosum & pons/medulla brainstem",
+    ],
     thermalBias: 0.88,
     realisticColor: "#D89A9E",
-    realisticRoughness: 0.42,
-    assetSource: "twin.glb",
-    assetNote: "Mesh ORG_brain + cranial sensory tracts from twin.glb",
-    focusTarget: [0, 0.78, 0.0],
-    focusCameraOffset: [0.22, 0.08, 0.62],
+    realisticRoughness: 0.38,
+    assetSource: "hybrid",
+    assetNote:
+      "Sculpted multi-part cerebrum, foliated cerebellum, corpus callosum & brainstem + twin.glb cranial sensory tracts",
+    focusTarget: [0, 0.77, -0.008],
+    focusCameraOffset: [0.28, 0.06, 0.44],
     labelOffset: [0.16, 0.04, 0.0],
   },
   {

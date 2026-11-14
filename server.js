@@ -112,8 +112,13 @@ app.post("/api/assistant", async (req, res, next) => {
     const result = await answerMedicalQuery({
       question: body.question,
       selectedOrganId: body.selectedOrganId || null,
+      selectedSuitComponentId: body.selectedSuitComponentId || null,
+      suitActive: Boolean(body.suitActive),
+      explodeProgress: Number(body.explodeProgress || 0),
       mode: body.mode || "holographic",
       isolated: Boolean(body.isolated),
+      alerts: Array.isArray(body.alerts) ? body.alerts : [],
+      telemetrySummary: typeof body.telemetrySummary === "string" ? body.telemetrySummary : "",
     });
     res.json(result);
   } catch (e) {

@@ -488,12 +488,12 @@ for s in (-1, 1):
     arm += [C(tuple(SH[s]), tuple(EL[s]), .011),                                   # humerus
             C(tuple(EL[s] + Vector((0, -.006, 0))), tuple(WR[s] + Vector((0, -.006, 0))), .007),   # radius
             C(tuple(EL[s] + Vector((0, .012, 0))), tuple(WR[s] + Vector((0, .008, 0))), .0065)]    # ulna
-    Hj, Kj, Fj = HIP[s], KNEE[s], ANK[s]
-    leg += [C((s * .085, Hj.y, .935), tuple(Hj + Vector((0, 0, .02))), .013),           # femoral neck
-            C(tuple(Hj + Vector((0, 0, .02))), tuple(Kj + Vector((0, 0, .02))), .014),   # femur shaft
-            C(tuple(Kj - Vector((0, 0, .02))), tuple(Fj + Vector((0, 0, .01))), .012),   # tibia
-            C(tuple(Kj + Vector((s * .018, .012, -.025))), tuple(Fj + Vector((s * .016, .012, .02))), .006),  # fibula
-            E(tuple(Kj + Vector((0, -.036, .005))), (.014, .008, .016))]                # knee cap
+    H, K, F = HIP[s], KNEE[s], ANK[s]
+    leg += [C((s * .085, H.y, .935), tuple(H + Vector((0, 0, .02))), .013),           # femoral neck
+            C(tuple(H + Vector((0, 0, .02))), tuple(K + Vector((0, 0, .02))), .014),   # femur shaft
+            C(tuple(K - Vector((0, 0, .02))), tuple(F + Vector((0, 0, .01))), .012),   # tibia
+            C(tuple(K + Vector((s * .018, .012, -.025))), tuple(F + Vector((s * .016, .012, .02))), .006),  # fibula
+            E(tuple(K + Vector((0, -.036, .005))), (.014, .008, .016))]                # knee cap
 finish(metaballs("Arms", arm, .004), "ORG_bones_arm", M_BONE, 5000)
 finish(metaballs("Legs", leg, .004), "ORG_bones_leg", M["leg"], 7000)
 

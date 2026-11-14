@@ -1,5 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { Activity, Layers, RotateCcw, Shield, User } from "lucide-react";
 import type { AnatomyId, CameraPresetId } from "../data/anatomyCatalog.ts";
+import type { SuitComponentId } from "../data/spacesuitCatalog.ts";
+import type { SuitTelemetrySnapshot } from "../utils/telemetryEngine.ts";
 import { THERMAL_DISCLOSURE, getThermalGradientCss } from "../utils/thermalPalette.ts";
 import type { SimulationState } from "../utils/simulationState.ts";
 import {
@@ -11,19 +14,44 @@ import {
 export interface AnatomyViewportHandle {
   focusCameraPreset: (preset: CameraPresetId) => void;
   focusOnOrgan: (organId: AnatomyId, closeZoom?: boolean) => void;
+  focusOnSuitComponent: (componentId: SuitComponentId, closeZoom?: boolean) => void;
 }
 
 interface AnatomyViewportProps {
   state: SimulationState;
+  telemetrySnapshot: SuitTelemetrySnapshot;
   onSelectOrgan: (id: AnatomyId | null, focusZoom: boolean) => void;
+  onSelectSuitComponent: (
+    id: SuitComponentId | null,
+    focusZoom: boolean,
+    openHud?: boolean,
+  ) => void;
+  onToggleSuitMode: (active: boolean) => void;
+  onChangeExplodeProgress: (val: number) => void;
+  onRestoreSuit: () => void;
+  onOpenTelemetryHud: () => void;
 }
 
 export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewportProps>(
-  function AnatomyViewport({ state, onSelectOrgan }, ref) {
+  function AnatomyViewport(
+    {
+      state,
+      telemetrySnapshot,
+      onSelectOrgan,
+      onSelectSuitComponent,
+      onToggleSuitMode,
+      onChangeExplodeProgress,
+      onRestoreSuit,
+      onOpenTelemetryHud,
+    },
+    ref,
+  ) {
     const mountRef = useRef<HTMLDivElement | null>(null);
     const controllerRef = useRef<MedicalViewportController | null>(null);
-    const onSelectRef = useRef(onSelectOrgan);
-    onSelectRef.current = onSelectOrgan;
+    const onSelectOrganRef = useRef(onSelectOrgan);
+    onSelectOrganRef.current = onSelectOrgan;
+    const onSelectSuitRef = useRef(onSelectSuitComponent);
+    onSelectSuitRef.current = onSelectSuitComponent;
 
     const initialStateRef = useRef(state);
 
@@ -34,7 +62,7 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
     const [telemetry, setTelemetry] = useState<TelemetryReadout>({
       azimuthDeg: 8,
       elevationDeg: 4,
-      zoomDistance: 2.51,
+      zoomDistance: 3.56,
     });
 
     useImperativeHandle(
@@ -45,6 +73,9 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         },
         focusOnOrgan(organId, closeZoom = false) {
           controllerRef.current?.focusOnOrgan(organId, closeZoom);
+        },
+        focusOnSuitComponent(componentId, closeZoom = false) {
+          controllerRef.current?.focusOnSuitComponent(componentId, closeZoom);
         },
       }),
       [],
@@ -58,7 +89,9 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         onLoadProgress: (pct) => setLoadProgress(pct),
         onReady: () => setReady(true),
         onError: (msg) => setError(msg),
-        onSelectOrgan: (id, focusZoom) => onSelectRef.current(id, focusZoom),
+        onSelectOrgan: (id, focusZoom) => onSelectOrganRef.current(id, focusZoom),
+        onSelectSuitComponent: (id, focusZoom, openHud) =>
+          onSelectSuitRef.current(id, focusZoom, openHud),
         onTelemetry: (t) => setTelemetry(t),
         onLabelsProject: (projected) => setLabels(projected),
       });
@@ -74,6 +107,17 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
       controllerRef.current?.updateState(state);
     }, [state]);
 
+    useEffect(() => {
+      controllerRef.current?.updateTelemetrySnapshot(telemetrySnapshot);
+    }, [telemetrySnapshot]);
+
+    const alertBorderClass =
+      state.suitActive && telemetrySnapshot.overallStatus === "critical"
+        ? "border-rose-500/50"
+        : state.suitActive && telemetrySnapshot.overallStatus === "warning"
+          ? "border-orange-400/50"
+          : "border-cyan-500/25";
+
     return (
       <div className="relative flex-1 min-w-0 h-full overflow-hidden bg-[#030915]">
         {/* Isolated WebGL canvas mount node */}
@@ -83,8 +127,10 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           className="w-full h-full cursor-grab active:cursor-grabbing"
         />
 
-        {/* Subtle holographic reticle corners */}
-        <div className="pointer-events-none absolute top-3 left-3 flex flex-col gap-1 border-l-2 border-cyan-400/60 pl-2.5 py-0.5 bg-[#040d1c]/80 border border-cyan-500/20 pr-3">
+        {/* Top-left 360° Spatial Telemetry + Controls Hint */}
+        <div
+          className={`pointer-events-none hidden sm:flex absolute top-3 left-3 flex-col gap-1 border-l-2 border-cyan-400/60 pl-2.5 py-1 bg-[#040d1c]/85 border ${alertBorderClass} pr-3`}
+        >
           <div className="text-[10px] uppercase tracking-[0.14em] text-cyan-300/80 font-mono">
             360° Spatial Telemetry
           </div>
@@ -93,72 +139,150 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
             <span>EL {telemetry.elevationDeg}°</span>
             <span>DIST {telemetry.zoomDistance.toFixed(2)}m</span>
           </div>
+          <div className="text-[9px] font-mono tracking-wider text-slate-400 pt-0.5 border-t border-cyan-500/15">
+            DRAG ORBIT · SCROLL ZOOM · DBL-CLICK FOCUS
+          </div>
         </div>
 
-        {/* Navigation hint top-right */}
-        <div className="pointer-events-none hidden sm:block absolute top-3 right-3 px-2.5 py-1.5 bg-[#040d1c]/80 border border-cyan-500/20 text-[10px] font-mono tracking-wider text-slate-300">
-          DRAG: ORBIT · SCROLL: ZOOM · RIGHT-DRAG: PAN · DBL-CLICK: FOCUS
+        {/* Top-Center Prominent One-Click Human <-> Astronaut Transformation Switch */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center bg-[#040d1c]/95 border border-cyan-400/45 shadow-[0_0_24px_rgba(0,140,255,0.22)]">
+          <button
+            type="button"
+            data-testid="human-mode-btn"
+            onClick={() => onToggleSuitMode(false)}
+            aria-pressed={!state.suitActive}
+            className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              !state.suitActive
+                ? "bg-cyan-500/25 text-white border-r border-cyan-400/50"
+                : "text-slate-300 hover:text-white border-r border-cyan-500/20"
+            }`}
+          >
+            <User className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Normal Human</span>
+          </button>
+          <button
+            type="button"
+            data-testid="astronaut-mode-btn"
+            onClick={() => onToggleSuitMode(true)}
+            aria-pressed={state.suitActive}
+            className={`px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+              state.suitActive
+                ? "bg-[#12264d] text-cyan-100 shadow-[inset_0_0_12px_rgba(0,229,255,0.25)]"
+                : "text-slate-300 hover:text-white"
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-violet-400" />
+            <span>Astronaut Spacesuit</span>
+          </button>
         </div>
 
-        {/* Callout labels: pushed out to the side of the body with leader lines, never overlapping */}
-        {ready && state.display.showLabels && (() => {
-          const W = mountRef.current?.clientWidth ?? 800;
-          const ROW = 26;
-          const placed: (LabelProjection & { side: number; lx: number; ly: number })[] = [];
-          for (const side of [-1, 1]) {
-            const group = labels
-              .filter((l) => l.visible && (l.x < W / 2 ? -1 : 1) === side)
-              .sort((p, q) => p.y - q.y);
-            let last = -Infinity;
-            for (const l of group) {
-              const ly = Math.max(l.y, last + ROW);
-              last = ly;
-              const lx = Math.min(Math.max(l.x + side * 64, 8), W - 8);
-              placed.push({ ...l, side, lx, ly });
-            }
-          }
-          return (
-            <div className="pointer-events-none absolute inset-0 overflow-hidden">
-              <svg className="absolute inset-0 w-full h-full" aria-hidden="true">
-                {placed.map((l) => (
-                  <g key={l.id}>
-                    <polyline
-                      points={`${l.x},${l.y} ${l.lx - l.side * 10},${l.ly} ${l.lx},${l.ly}`}
-                      fill="none"
-                      stroke={l.selected ? "rgba(103,232,249,0.95)" : "rgba(103,232,249,0.45)"}
-                      strokeWidth={l.selected ? 1.5 : 1}
-                    />
-                    <circle cx={l.x} cy={l.y} r={l.selected ? 3.5 : 2.5} fill="#22d3ee" />
-                  </g>
-                ))}
-              </svg>
-              {placed.map((l) => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => onSelectOrgan(l.id, true)}
-                  title={`Open ${l.name} forecast`}
-                  style={{
-                    transform: `translate(${l.lx}px, ${l.ly}px) translate(${l.side < 0 ? "-100%" : "0"}, -50%)`,
-                  }}
-                  className={`pointer-events-auto cursor-pointer absolute top-0 left-0 px-2 py-1 text-[11px] font-mono tracking-wider uppercase border rounded-sm transition-all duration-150 ${
-                    l.selected
-                      ? "bg-cyan-400/20 border-cyan-200 text-white shadow-[0_0_14px_rgba(0,229,255,0.45)]"
-                      : "bg-[#040d1c]/90 border-cyan-400/40 text-cyan-100 hover:bg-cyan-400/15 hover:border-cyan-200 hover:text-white hover:scale-105"
-                  }`}
-                >
-                  {l.name}
-                  <span className="ml-1.5 text-cyan-300/70">›</span>
-                </button>
-              ))}
+        {/* Exploded View & AI HUD Dock (Visible when Astronaut Spacesuit Mode is Active) */}
+        {state.suitActive && (
+          <div
+            data-testid="suit-viewport-controls"
+            className="absolute bottom-3 left-3 z-20 bg-[#040d1c]/92 border border-cyan-400/35 p-2.5 flex flex-col gap-2 w-64"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <label
+                htmlFor="suit-explode-slider"
+                className="text-[10px] font-mono uppercase tracking-[0.12em] text-cyan-300 flex items-center gap-1"
+              >
+                <Layers className="w-3 h-3" />
+                Exploded View
+              </label>
+              <span className="text-[11px] font-mono tabular-nums text-white">
+                {Math.round(state.explodeProgress * 100)}%
+              </span>
             </div>
-          );
-        })()}
+            <input
+              id="suit-explode-slider"
+              data-testid="suit-explode-slider"
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              value={state.explodeProgress}
+              onChange={(e) => onChangeExplodeProgress(Number(e.target.value))}
+              className="w-full accent-cyan-400 cursor-pointer"
+            />
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="open-ai-hud-btn"
+                onClick={onOpenTelemetryHud}
+                className={`flex-1 px-2 py-1 border text-[10px] font-mono uppercase flex items-center justify-center gap-1 transition-colors ${
+                  telemetrySnapshot.overallStatus === "critical"
+                    ? "bg-rose-500/20 border-rose-400 text-rose-100 hover:bg-rose-500/30"
+                    : "bg-violet-500/20 border-violet-400/60 text-violet-100 hover:bg-violet-500/30"
+                }`}
+              >
+                <Activity className="w-3 h-3" />
+                AI Monitoring HUD
+              </button>
+              {state.explodeProgress > 0 && (
+                <button
+                  type="button"
+                  data-testid="restore-suit-btn"
+                  onClick={onRestoreSuit}
+                  className="px-2 py-1 border border-cyan-500/35 bg-[#061529] text-[10px] font-mono uppercase text-cyan-200 hover:border-cyan-300 flex items-center gap-1"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  Restore
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
-        {/* First-run hint so it is obvious what is clickable */}
-        {ready && !state.selectedOrganId && (
-          <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full border border-cyan-300/40 bg-[#040d1c]/85 text-[11px] font-mono tracking-wider text-cyan-100 animate-pulse">
-            TAP ANY ORGAN OR LABEL FOR ITS FORECAST
+        {/* Floating holographic 3D-projected anatomical & spacesuit labels */}
+        {ready && state.display.showLabels && (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            {labels
+              .filter((lbl) => lbl.visible)
+              .map((lbl) => {
+                const isAlertCrit = lbl.alertSeverity === "critical";
+                const isAlertWarn = lbl.alertSeverity === "warning";
+                return (
+                  <button
+                    key={`${lbl.kind}-${lbl.id}`}
+                    type="button"
+                    onClick={() => {
+                      if (lbl.kind === "suit") {
+                        onSelectSuitComponent(
+                          lbl.id as SuitComponentId,
+                          true,
+                          lbl.id === "chest_display" || lbl.id === "wrist_bearings",
+                        );
+                      } else {
+                        onSelectOrgan(lbl.id as AnatomyId, true);
+                      }
+                    }}
+                    style={{
+                      transform: `translate(${lbl.x}px, ${lbl.y}px) translate(-50%, -50%)`,
+                    }}
+                    className={`pointer-events-auto absolute top-0 left-0 px-2 py-0.5 text-[10px] font-mono tracking-wider uppercase border transition-colors ${
+                      isAlertCrit
+                        ? "bg-[#240914]/95 border-rose-400 text-rose-100"
+                        : isAlertWarn
+                          ? "bg-[#221307]/95 border-orange-400 text-orange-100"
+                          : lbl.selected
+                            ? "bg-[#061830]/95 border-cyan-300 text-cyan-200 shadow-[0_0_12px_rgba(0,229,255,0.35)]"
+                            : "bg-[#040d1c]/85 border-cyan-400/35 text-cyan-100/90 hover:border-cyan-300 hover:text-white"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block w-1.5 h-1.5 mr-1.5 align-middle ${
+                        isAlertCrit
+                          ? "bg-rose-400"
+                          : isAlertWarn
+                            ? "bg-orange-400"
+                            : "bg-cyan-400"
+                      }`}
+                    />
+                    {lbl.name}
+                  </button>
+                );
+              })}
           </div>
         )}
 
@@ -166,7 +290,7 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         {state.mode === "thermal" && (
           <div
             data-testid="thermal-legend"
-            className="absolute bottom-3 right-3 w-64 p-3 bg-[#040d1c]/92 border border-orange-400/35 text-xs"
+            className="absolute bottom-3 right-3 w-64 p-3 bg-[#040d1c]/92 border border-orange-400/35 text-xs z-20"
           >
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-orange-300">

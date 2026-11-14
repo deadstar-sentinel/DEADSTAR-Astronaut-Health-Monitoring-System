@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
+  Activity,
+  AlertTriangle,
   Bot,
   Crosshair,
   Eye,
@@ -8,20 +10,27 @@ import {
   X,
 } from "lucide-react";
 import { ANATOMY_BY_ID, type AnatomyId } from "../data/anatomyCatalog.ts";
+import { SUIT_COMPONENT_BY_ID, type SuitComponentId } from "../data/spacesuitCatalog.ts";
+import type { SuitTelemetrySnapshot } from "../utils/telemetryEngine.ts";
 import {
   getSelectedStructure,
+  getSelectedSuitComponent,
   type SimulationState,
 } from "../utils/simulationState.ts";
-import { ForecastCard } from "./ForecastCard.tsx";
 
 interface RightInspectorPanelProps {
   state: SimulationState;
+  telemetrySnapshot: SuitTelemetrySnapshot;
   isOpen: boolean;
+  externalPrompt?: { id: number; text: string } | null;
   onCloseMobile: () => void;
   onSelectOrgan: (id: AnatomyId | null) => void;
+  onSelectSuitComponent: (id: SuitComponentId | null) => void;
   onToggleIsolate: () => void;
   onRestoreBody: () => void;
   onFocusOrgan: (id: AnatomyId) => void;
+  onFocusSuitComponent: (id: SuitComponentId) => void;
+  onOpenMonitoringHud: () => void;
 }
 
 interface ChatMessage {
@@ -31,24 +40,37 @@ interface ChatMessage {
 }
 
 const QUICK_ORGANS: AnatomyId[] = ["brain", "heart", "lungs", "pancreas"];
+const QUICK_SUIT_PARTS: SuitComponentId[] = [
+  "helmet_visor",
+  "chest_display",
+  "plss",
+  "cooling_system",
+];
 
 export function RightInspectorPanel({
   state,
+  telemetrySnapshot,
   isOpen,
+  externalPrompt,
   onCloseMobile,
   onSelectOrgan,
+  onSelectSuitComponent,
   onToggleIsolate,
   onRestoreBody,
   onFocusOrgan,
+  onFocusSuitComponent,
+  onOpenMonitoringHud,
 }: RightInspectorPanelProps) {
-  const selected = getSelectedStructure(state);
+  const selectedOrgan = getSelectedStructure(state);
+  const selectedSuit = getSelectedSuitComponent(state);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const lastHandledPromptId = useRef<number>(0);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      text: "Select any anatomical structure in the 3D viewport or directory to inspect its location, biological function, and isolated 3D view. Ask me any anatomical question below.",
+      text: "Select any anatomical structure or EVA spacesuit subsystem in the 3D viewport to inspect functions, operating principles, telemetry, and isolated views.",
       source: "knowledge-base",
     },
   ]);
@@ -65,6 +87,10 @@ export function RightInspectorPanel({
     setQuestion("");
     setLoading(true);
 
+    const telemetrySummary = state.suitActive
+      ? `HR ${telemetrySnapshot.vitals.heartRateBpm.value} BPM, SpO2 ${telemetrySnapshot.vitals.spo2Pct.value}%, O2 ${telemetrySnapshot.lifeSupport.remainingO2Pct.value}%, pCO2 ${telemetrySnapshot.lifeSupport.co2MmHg.value} mmHg, Suit Pressure ${telemetrySnapshot.lifeSupport.suitPressureKpa.value} kPa, Battery ${telemetrySnapshot.power.batteryPct.value}%`
+      : "";
+
     try {
       const res = await fetch("/api/assistant", {
         method: "POST",
@@ -72,8 +98,13 @@ export function RightInspectorPanel({
         body: JSON.stringify({
           question: trimmed,
           selectedOrganId: state.selectedOrganId,
+          selectedSuitComponentId: state.selectedSuitComponentId,
+          suitActive: state.suitActive,
+          explodeProgress: state.explodeProgress,
           mode: state.mode,
           isolated: state.isolated,
+          alerts: telemetrySnapshot.alerts,
+          telemetrySummary,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -84,7 +115,7 @@ export function RightInspectorPanel({
           role: "assistant",
           text:
             data.answer ||
-            "No anatomical response returned. Try rephrasing your question.",
+            "No response returned. Try rephrasing your anatomy or suit question.",
           source: data.source,
         },
       ]);
@@ -93,7 +124,7 @@ export function RightInspectorPanel({
         ...prev,
         {
           role: "assistant",
-          text: "Assistant service is temporarily unreachable. Please inspect the anatomical overview panel above or try again.",
+          text: "Assistant service is temporarily unreachable. Please inspect the overview panel above or try again.",
           source: "error",
         },
       ]);
@@ -102,14 +133,25 @@ export function RightInspectorPanel({
     }
   };
 
+  useEffect(() => {
+    if (externalPrompt && externalPrompt.id !== lastHandledPromptId.current) {
+      lastHandledPromptId.current = externalPrompt.id;
+      void submitQuestion(externalPrompt.text);
+    }
+  });
+
   const handleFormSubmit = (e: FormEvent) => {
     e.preventDefault();
     void submitQuestion(question);
   };
 
+  const componentAlerts = selectedSuit
+    ? telemetrySnapshot.alerts.filter((a) => a.componentId === selectedSuit.id)
+    : [];
+
   return (
     <aside
-      aria-label="Organ inspector and medical simulation assistant"
+      aria-label="Organ and spacesuit inspector and AI simulation assistant"
       className={`${
         isOpen ? "translate-x-0" : "translate-x-full lg:translate-x-0"
       } fixed lg:static inset-y-11 right-0 z-30 w-[308px] shrink-0 bg-[#051020] border-l border-cyan-500/20 flex flex-col transition-transform duration-200`}
@@ -117,7 +159,7 @@ export function RightInspectorPanel({
       {/* Mobile/Tablet drawer header */}
       <div className="flex lg:hidden items-center justify-between px-3 py-2 border-b border-cyan-500/20">
         <span className="text-[11px] font-mono uppercase tracking-[0.14em] text-cyan-300">
-          Organ Inspector & AI Guide
+          Inspector & AI Guide
         </span>
         <button
           type="button"
@@ -129,19 +171,149 @@ export function RightInspectorPanel({
         </button>
       </div>
 
-      {/* Top Half: Selected Organ Details */}
+      {/* Top Half: Selected Suit Component / Organ Details */}
       <div className="flex-1 overflow-y-auto med-scroll p-3 space-y-3 border-b border-cyan-500/20">
-        {selected ? (
+        {selectedSuit ? (
+          <div data-testid="suit-inspector-card" className="space-y-3">
+            <div className="flex items-start justify-between gap-2 border-b border-cyan-500/20 pb-2.5">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-violet-300">
+                  {selectedSuit.code} · {selectedSuit.subsystem.replace("_", " ")}
+                </div>
+                <h2 className="text-lg font-semibold text-white leading-tight mt-0.5">
+                  {selectedSuit.name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectSuitComponent(null)}
+                title="Clear component selection"
+                aria-label="Clear spacesuit component selection"
+                className="p-1.5 border border-cyan-500/20 text-slate-400 hover:text-white hover:border-cyan-400"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {componentAlerts.map((al) => (
+              <div
+                key={al.id}
+                className={`p-2.5 border text-xs space-y-1 ${
+                  al.severity === "critical"
+                    ? "bg-[#220a14] border-rose-500/50 text-rose-100"
+                    : "bg-[#211408] border-orange-400/50 text-orange-100"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{al.title}</span>
+                </div>
+                <p className="text-[11px] leading-snug opacity-90">{al.reason}</p>
+              </div>
+            ))}
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                data-testid="isolate-suit-btn"
+                onClick={state.isolated ? onRestoreBody : onToggleIsolate}
+                className={`px-2.5 py-2 border text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                  state.isolated
+                    ? "bg-cyan-500/20 border-cyan-300 text-cyan-100"
+                    : "bg-[#081a33] border-cyan-500/30 text-cyan-200 hover:border-cyan-300"
+                }`}
+              >
+                {state.isolated ? (
+                  <>
+                    <Eye className="w-3.5 h-3.5" />
+                    Restore Suit
+                  </>
+                ) : (
+                  <>
+                    <Focus className="w-3.5 h-3.5" />
+                    Isolate Part
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => onFocusSuitComponent(selectedSuit.id)}
+                className="px-2.5 py-2 border border-cyan-500/25 bg-[#040c18] text-xs font-medium text-slate-200 hover:border-cyan-400 hover:text-white flex items-center justify-center gap-1.5"
+              >
+                <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+                Zoom Focus
+              </button>
+            </div>
+
+            {(selectedSuit.id === "chest_display" || selectedSuit.id === "wrist_bearings") && (
+              <button
+                type="button"
+                onClick={onOpenMonitoringHud}
+                className="w-full px-2.5 py-2 border border-violet-400/50 bg-violet-500/15 text-xs font-mono uppercase text-violet-100 hover:bg-violet-500/25 flex items-center justify-center gap-1.5"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                Open AI Monitoring Dashboard
+              </button>
+            )}
+
+            <div className="space-y-2.5 text-xs">
+              <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
+                  Suit Location
+                </div>
+                <p className="text-slate-200 leading-relaxed">{selectedSuit.location}</p>
+              </div>
+
+              <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
+                  Engineering Purpose
+                </div>
+                <p className="text-slate-200 leading-relaxed">{selectedSuit.purpose}</p>
+              </div>
+
+              <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
+                  Operating Principles
+                </div>
+                <p className="text-slate-300 leading-relaxed">{selectedSuit.operatingPrinciples}</p>
+              </div>
+
+              <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1.5">
+                  Technical Specifications
+                </div>
+                <div className="space-y-1">
+                  {selectedSuit.keySpecs.map((spec) => (
+                    <div
+                      key={spec}
+                      className="px-2 py-1 bg-[#071529] border border-cyan-500/15 text-[11px] font-mono text-slate-200 truncate"
+                    >
+                      {spec}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="px-2.5 py-2 bg-[#030914] border border-slate-700/60 text-[10px] font-mono text-slate-400">
+                MODEL SOURCE:{" "}
+                <span className="text-violet-300 uppercase">{selectedSuit.assetSource}</span>
+                <div className="mt-0.5 text-slate-500">{selectedSuit.assetNote}</div>
+              </div>
+            </div>
+          </div>
+        ) : selectedOrgan ? (
           <div data-testid="organ-inspector-card" className="space-y-3">
             <div className="flex items-start justify-between gap-2 border-b border-cyan-500/20 pb-2.5">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-400">
-                  {selected.system} system
+                  {selectedOrgan.system} system
                 </div>
                 <h2 className="text-lg font-semibold text-white leading-tight mt-0.5">
-                  {selected.name}
+                  {selectedOrgan.name}
                 </h2>
-                <div className="text-[11px] font-mono text-slate-400">{selected.latinName}</div>
+                <div className="text-[11px] font-mono text-slate-400">
+                  {selectedOrgan.latinName}
+                </div>
               </div>
               <button
                 type="button"
@@ -154,7 +326,6 @@ export function RightInspectorPanel({
               </button>
             </div>
 
-            {/* Action Buttons: Isolate / Restore & Camera Focus */}
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
@@ -180,7 +351,7 @@ export function RightInspectorPanel({
               </button>
               <button
                 type="button"
-                onClick={() => onFocusOrgan(selected.id)}
+                onClick={() => onFocusOrgan(selectedOrgan.id)}
                 className="px-2.5 py-2 border border-cyan-500/25 bg-[#040c18] text-xs font-medium text-slate-200 hover:border-cyan-400 hover:text-white flex items-center justify-center gap-1.5"
               >
                 <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
@@ -188,29 +359,26 @@ export function RightInspectorPanel({
               </button>
             </div>
 
-            <ForecastCard organId={selected.id} />
-
-            {/* Anatomical Metadata */}
             <div className="space-y-2.5 text-xs">
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
                 <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
                   Anatomical Location
                 </div>
-                <p className="text-slate-200 leading-relaxed">{selected.location}</p>
+                <p className="text-slate-200 leading-relaxed">{selectedOrgan.location}</p>
               </div>
 
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
                 <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
                   Biological Function
                 </div>
-                <p className="text-slate-200 leading-relaxed">{selected.biologicalFunction}</p>
+                <p className="text-slate-200 leading-relaxed">{selectedOrgan.biologicalFunction}</p>
               </div>
 
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
                 <div className="text-[10px] font-mono uppercase tracking-wider text-cyan-300/80 mb-1">
                   Medical & Structural Details
                 </div>
-                <p className="text-slate-300 leading-relaxed">{selected.medicalDetails}</p>
+                <p className="text-slate-300 leading-relaxed">{selectedOrgan.medicalDetails}</p>
               </div>
 
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
@@ -218,7 +386,7 @@ export function RightInspectorPanel({
                   Key Substructures
                 </div>
                 <div className="grid grid-cols-2 gap-1">
-                  {selected.keyStructures.map((sub) => (
+                  {selectedOrgan.keyStructures.map((sub) => (
                     <div
                       key={sub}
                       className="px-2 py-1 bg-[#071529] border border-cyan-500/15 text-[11px] text-slate-200 truncate"
@@ -230,8 +398,74 @@ export function RightInspectorPanel({
               </div>
 
               <div className="px-2.5 py-2 bg-[#030914] border border-slate-700/60 text-[10px] font-mono text-slate-400">
-                MODEL SOURCE: <span className="text-cyan-300 uppercase">{selected.assetSource}</span>
-                <div className="mt-0.5 text-slate-500">{selected.assetNote}</div>
+                MODEL SOURCE:{" "}
+                <span className="text-cyan-300 uppercase">{selectedOrgan.assetSource}</span>
+                <div className="mt-0.5 text-slate-500">{selectedOrgan.assetNote}</div>
+              </div>
+            </div>
+          </div>
+        ) : state.suitActive ? (
+          <div className="space-y-3">
+            <div className="p-3 bg-[#040c18] border border-violet-400/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-violet-300">
+                  EVA Life-Support Summary
+                </span>
+                <span className="text-[9px] font-mono text-slate-400">SIMULATED</span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono tabular-nums">
+                <div className="p-1.5 bg-[#071529] border border-cyan-500/15">
+                  <div className="text-[9px] text-slate-400">HEART RATE</div>
+                  <div className="text-cyan-200">{telemetrySnapshot.vitals.heartRateBpm.value} BPM</div>
+                </div>
+                <div className="p-1.5 bg-[#071529] border border-cyan-500/15">
+                  <div className="text-[9px] text-slate-400">O2 RESERVE</div>
+                  <div className="text-cyan-200">
+                    {telemetrySnapshot.lifeSupport.remainingO2Pct.value}%
+                  </div>
+                </div>
+                <div className="p-1.5 bg-[#071529] border border-cyan-500/15">
+                  <div className="text-[9px] text-slate-400">SUIT PRESSURE</div>
+                  <div className="text-cyan-200">
+                    {telemetrySnapshot.lifeSupport.suitPressureKpa.value} kPa
+                  </div>
+                </div>
+                <div className="p-1.5 bg-[#071529] border border-cyan-500/15">
+                  <div className="text-[9px] text-slate-400">BATTERY</div>
+                  <div className="text-emerald-300">{telemetrySnapshot.power.batteryPct.value}%</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenMonitoringHud}
+                className="w-full py-1.5 border border-cyan-400/45 bg-cyan-500/15 text-[11px] font-mono uppercase text-cyan-100 hover:bg-cyan-500/25 flex items-center justify-center gap-1.5"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                Open AI Dashboard & 48h Forecast
+              </button>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-slate-400 mb-1.5">
+                Quick Suit Inspection
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {QUICK_SUIT_PARTS.map((id) => {
+                  const part = SUIT_COMPONENT_BY_ID[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onSelectSuitComponent(id)}
+                      className="px-2.5 py-2 bg-[#040c18] border border-cyan-500/20 text-left hover:border-violet-400 transition-colors"
+                    >
+                      <div className="text-xs font-medium text-white truncate">{part.name}</div>
+                      <div className="text-[10px] font-mono text-slate-400 truncate">
+                        {part.code}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -242,9 +476,8 @@ export function RightInspectorPanel({
                 Full-Body Inspection Active
               </div>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Click any internal organ in the 3D hologram or choose from the directory to zoom,
-                dim surrounding anatomy, and inspect biological functions. Double-click any organ
-                for close-up focus.
+                Click any internal organ in the 3D hologram or transform into Astronaut Spacesuit
+                Mode at the top of the viewport to inspect all 22 EVA life-support & suit systems.
               </p>
             </div>
 
@@ -275,13 +508,13 @@ export function RightInspectorPanel({
         )}
       </div>
 
-      {/* Bottom Half: AI Medical Simulation Assistant */}
+      {/* Bottom Half: AI Medical & Aerospace Simulation Assistant */}
       <div className="h-[268px] shrink-0 flex flex-col bg-[#040b18]">
         <div className="px-3 py-2 border-b border-cyan-500/20 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <Bot className="w-3.5 h-3.5 text-cyan-400" />
             <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-300">
-              AI Medical Assistant
+              {state.suitActive ? "AI Suit & Medical Guide" : "AI Medical Assistant"}
             </span>
           </div>
           <span className="text-[9px] font-mono text-slate-400">EDUCATIONAL</span>
@@ -307,7 +540,7 @@ export function RightInspectorPanel({
           ))}
           {loading && (
             <div className="p-2 border border-cyan-500/15 bg-[#061325] text-cyan-300 font-mono text-[11px]">
-              Querying anatomical model...
+              Querying simulation model...
             </div>
           )}
           <div ref={chatEndRef} />
@@ -315,10 +548,20 @@ export function RightInspectorPanel({
 
         {/* Context quick prompts */}
         <div className="px-2.5 py-1.5 border-t border-cyan-500/15 flex gap-1 overflow-x-auto med-scroll shrink-0">
-          {[
-            selected ? `Function of ${selected.name}?` : "Overview of cardiovascular system?",
-            state.mode === "thermal" ? "Explain Thermal Mode colors" : "Anatomical landmarks?",
-          ].map((prompt) => (
+          {(state.suitActive
+            ? [
+                selectedSuit ? `How does ${selectedSuit.name} work?` : "Explain PLSS O2 & CO2 loop",
+                telemetrySnapshot.alerts.length > 0
+                  ? "Why did this alert trigger?"
+                  : "Explain 48h forecast assumptions",
+              ]
+            : [
+                selectedOrgan
+                  ? `Function of ${selectedOrgan.name}?`
+                  : "Overview of cardiovascular system?",
+                state.mode === "thermal" ? "Explain Thermal Mode colors" : "Anatomical landmarks?",
+              ]
+          ).map((prompt) => (
             <button
               key={prompt}
               type="button"
@@ -338,8 +581,10 @@ export function RightInspectorPanel({
             type="text"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask about anatomy or mode..."
-            aria-label="Ask AI medical assistant"
+            placeholder={
+              state.suitActive ? "Ask about suit systems or alerts..." : "Ask about anatomy or mode..."
+            }
+            aria-label="Ask AI medical and spacesuit assistant"
             className="flex-1 min-w-0 px-2.5 py-1.5 bg-[#030914] border border-cyan-500/25 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
           />
           <button

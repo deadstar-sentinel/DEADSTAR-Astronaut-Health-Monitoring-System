@@ -120,12 +120,10 @@ export function createHologramShellMaterial(): THREE.ShaderMaterial {
         if (uScanEnabled > 0.5) {
           float sweepY = mod(uTime * 0.42, 2.2) - 1.05;
           scanBand = exp(-pow((vWorldPos.y - sweepY) * 18.0, 2.0)) * 0.85;
-          float lineArg = vWorldPos.y * 190.0 - uTime * 2.6;
-          float lineAA = 1.0 - smoothstep(0.6, 1.6, fwidth(lineArg)); // no sub-pixel shimmer
-          fineLines = smoothstep(0.86, 1.0, sin(lineArg)) * 0.16 * lineAA;
+          fineLines = smoothstep(0.86, 1.0, sin(vWorldPos.y * 190.0 - uTime * 2.6)) * 0.16;
         }
 
-        float flicker = mix(1.0, 0.985 + 0.015 * sin(uTime * 1.2), uFlickerEnabled);
+        float flicker = mix(1.0, 0.96 + 0.04 * sin(uTime * 31.0) * sin(uTime * 7.1), uFlickerEnabled);
         float violetMix = smoothstep(0.35, 0.95, fresnel) * (0.42 + 0.2 * sin(vWorldPos.y * 3.0 + uTime));
         vec3 baseCol = mix(uPrimary, uSecondary, violetMix * 0.45);
         vec3 col = baseCol * (fresnel * 1.45 + scanBand + fineLines + 0.07) * uIntensity * flicker;
@@ -343,7 +341,7 @@ export function createPathwayPulseMaterial(
         float packet = exp(-pow((flow - 0.5) * 7.5, 2.0));
         float dimFactor = mix(1.0, 0.18, uDimmed);
         float boost = 1.0 + uHighlight * 0.45;
-        vec3 col = mix(uBase, uPulse, packet * 0.85 + rim * 0.35) * (0.6 + packet * 0.8 + rim * 0.45) * uIntensity * boost * dimFactor;
+        vec3 col = mix(uBase, uPulse, packet * 0.85 + rim * 0.35) * (0.65 + packet * 1.45 + rim * 0.6) * uIntensity * boost * dimFactor;
         float alpha = clamp((0.45 + packet * 0.55 + rim * 0.3) * uOpacity * dimFactor, 0.05, 0.98);
         gl_FragColor = vec4(col, alpha);
       }

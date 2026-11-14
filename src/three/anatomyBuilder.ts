@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshSurfaceSampler } from "three/addons/math/MeshSurfaceSampler.js";
 import { ANATOMY_BY_ID, type AnatomyId } from "../data/anatomyCatalog.ts";
+import { buildProceduralBrain } from "./brainBuilder.ts";
 
 export interface AnatomyMeshEntry {
   mesh: THREE.Mesh;
@@ -885,57 +886,6 @@ function buildProceduralVenousNetwork(bodyBox: THREE.Box3, parent: THREE.Group):
   return meshes;
 }
 
-const ARM_PART = /delt|biceps|triceps|forearm|brachial|_arm_|ulnar|median|radial/i;
-
-/** Rotate + stretch arm geometry from the authored shoulder->wrist line onto the measured one, per side. */
-function fitArmsToBones(scene: THREE.Object3D, invTwin: THREE.Matrix4, bodyBox: THREE.Box3, meshes: THREE.Mesh[]) {
-  const bones = scene.getObjectByName("ORG_bones_arm") as THREE.Mesh | undefined;
-  if (!bones) return;
-  const toLocal = new THREE.Matrix4().multiplyMatrices(invTwin, bones.matrixWorld);
-  const pos = bones.geometry.getAttribute("position");
-  const v = new THREE.Vector3();
-  const minY = bodyBox.min.y;
-  const h = bodyBox.max.y - bodyBox.min.y;
-  const yAt = (f: number) => minY + h * f;
-  for (const side of [-1, 1]) {
-    const pts: THREE.Vector3[] = [];
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i).applyMatrix4(toLocal);
-      if (side * v.x > 0.02) pts.push(v.clone());
-    }
-    if (pts.length < 10) continue;
-    const sh = pts.reduce((a, b) => (b.y > a.y ? b : a));
-    const wr = pts.reduce((a, b) => (b.distanceToSquared(sh) > a.distanceToSquared(sh) ? b : a));
-    const oldSh = new THREE.Vector2(side * 0.185, yAt(0.79));
-    const oldWr = new THREE.Vector2(side * 0.29, yAt(0.49));
-    const od = oldWr.clone().sub(oldSh);
-    const nd = new THREE.Vector2(wr.x - sh.x, wr.y - sh.y);
-    const rot = Math.atan2(nd.y, nd.x) - Math.atan2(od.y, od.x);
-    const k = nd.length() / od.length();
-    const c = Math.cos(rot) * k;
-    const sn = Math.sin(rot) * k;
-    for (const m of meshes) {
-      if (!ARM_PART.test(m.name)) continue;
-      const g = m.geometry.getAttribute("position");
-      for (let i = 0; i < g.count; i++) {
-        const x = g.getX(i);
-        if (side * x <= 0) continue;
-        const y = g.getY(i);
-        const w = THREE.MathUtils.smoothstep(side * x, 0.12, 0.185); // torso-side ends stay put
-        const dx = x - oldSh.x;
-        const dy = y - oldSh.y;
-        const nx = sh.x + c * dx - sn * dy;
-        const ny = sh.y + sn * dx + c * dy;
-        g.setXY(i, x + (nx - x) * w, y + (ny - y) * w);
-      }
-      g.needsUpdate = true;
-      m.geometry.computeVertexNormals();
-      m.geometry.computeBoundingSphere();
-      m.geometry.computeBoundingBox();
-    }
-  }
-}
-
 export async function loadAndBuildAnatomyTwin(
   isSoftwareGl: boolean,
   onProgress?: (pct: number) => void,
@@ -964,6 +914,7 @@ export async function loadAndBuildAnatomyTwin(
   const interactables: THREE.Object3D[] = [];
   const fxRings: THREE.Mesh[] = [];
 
+  let brainMesh: THREE.Mesh | null = null;
   let stomachMesh: THREE.Mesh | null = null;
   let gutMesh: THREE.Mesh | null = null;
   let spineMesh: THREE.Mesh | null = null;
@@ -974,6 +925,12 @@ export async function loadAndBuildAnatomyTwin(
 
     if (obj.name.startsWith("FX_")) {
       if (obj.name.startsWith("FX_ring")) fxRings.push(obj);
+      return;
+    }
+
+    if (obj.name === "ORG_brain") {
+      brainMesh = obj;
+      obj.visible = false; // Replaced by anatomically sculpted multi-part cerebral/cerebellar/brainstem meshes
       return;
     }
 
@@ -1026,6 +983,10 @@ export async function loadAndBuildAnatomyTwin(
   if (gutMesh) gutBox.setFromObject(gutMesh);
   else gutBox.set(new THREE.Vector3(-0.1, 0.95, -0.02), new THREE.Vector3(0.1, 1.14, 0.08));
 
+  const brainBox = new THREE.Box3();
+  if (brainMesh) brainBox.setFromObject(brainMesh);
+  else brainBox.set(new THREE.Vector3(-0.0614, 1.554, -0.086), new THREE.Vector3(0.0615, 1.748, 0.07));
+
   const spineBox = new THREE.Box3();
   if (spineMesh) spineBox.setFromObject(spineMesh);
   else spineBox.set(new THREE.Vector3(-0.03, 0.96, -0.09), new THREE.Vector3(0.03, 1.56, -0.04));
@@ -1033,6 +994,7 @@ export async function loadAndBuildAnatomyTwin(
   // Convert world-space Box3 into twinGroup local space
   const invTwin = new THREE.Matrix4().copy(twinGroup.matrixWorld).invert();
   bodyBox.applyMatrix4(invTwin);
+  brainBox.applyMatrix4(invTwin);
   stomachBox.applyMatrix4(invTwin);
   gutBox.applyMatrix4(invTwin);
   spineBox.applyMatrix4(invTwin);
@@ -1058,6 +1020,9 @@ export async function loadAndBuildAnatomyTwin(
     }
   };
 
+  const brainMeshes = buildProceduralBrain(brainBox, twinGroup);
+  registerProcedural(brainMeshes, "brain", "organ");
+
   const pancreasMeshes = buildProceduralPancreas(stomachBox, twinGroup);
   registerProcedural(pancreasMeshes, "pancreas", "organ");
 
@@ -1073,9 +1038,6 @@ export async function loadAndBuildAnatomyTwin(
 
   const veinMeshes = buildProceduralVenousNetwork(bodyBox, twinGroup);
   registerProcedural(veinMeshes, "circulatory", "vessel");
-
-  // Fit procedural arm parts (authored for an arms-down body) onto the Blender twin's real arm bones.
-  fitArmsToBones(gltf.scene, invTwin, bodyBox, [...muscularMeshes, ...nervousMeshes, ...veinMeshes]);
 
   // Sample holographic surface points on Body mesh
   let surfaceParticles: THREE.Points | null = null;
@@ -1124,14 +1086,12 @@ export async function loadAndBuildAnatomyTwin(
         attribute float aRand;
         varying float vGlow;
         void main() {
-          vec3 p = position;
+          vec3 p = position + aNormal * (0.0015 * sin(uTime * 1.6 + aRand * 25.0));
           float sweepY = mod(uTime * 0.42, 2.2) - 0.15;
           float sweep = exp(-pow((p.y - sweepY) * 18.0, 2.0));
-          vGlow = 0.26 + sweep * 0.85 + 0.08 * aRand;
+          vGlow = 0.28 + sweep * 0.85 + 0.14 * sin(uTime * 2.1 + aRand * 40.0);
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          float size = (1.35 + sweep * 1.5) * uPointScale / max(0.35, -mv.z);
-          vGlow *= clamp(size / 2.2, 0.35, 1.0);           // shrink brightness, not size, so points never drop below a pixel
-          gl_PointSize = max(size, 2.2);
+          gl_PointSize = (1.35 + sweep * 1.5) * uPointScale / max(0.35, -mv.z);
           gl_Position = projectionMatrix * mv;
         }
       `,

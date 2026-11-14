@@ -1,55 +1,98 @@
-import { Pause, Play, RotateCcw, Square } from "lucide-react";
+import { AlertTriangle, Pause, Play, RotateCcw, Square } from "lucide-react";
 import {
   CAMERA_PRESETS,
   VISUALIZATION_MODES,
   type AnimationMode,
   type CameraPresetId,
 } from "../data/anatomyCatalog.ts";
-import { getSelectedStructure, type SimulationState } from "../utils/simulationState.ts";
+import type { SuitTelemetrySnapshot } from "../utils/telemetryEngine.ts";
+import {
+  getSelectedStructure,
+  getSelectedSuitComponent,
+  type SimulationState,
+} from "../utils/simulationState.ts";
 
 interface BottomControlBarProps {
   state: SimulationState;
+  telemetrySnapshot: SuitTelemetrySnapshot;
   onCameraPreset: (preset: CameraPresetId) => void;
   onChangeIntensity: (val: number) => void;
   onChangeAnimationMode: (mode: AnimationMode) => void;
+  onOpenTelemetryHud: () => void;
 }
 
 const PRESET_ORDER: CameraPresetId[] = ["front", "back", "left", "right", "reset"];
 
 export function BottomControlBar({
   state,
+  telemetrySnapshot,
   onCameraPreset,
   onChangeIntensity,
   onChangeAnimationMode,
+  onOpenTelemetryHud,
 }: BottomControlBarProps) {
-  const selected = getSelectedStructure(state);
+  const selectedOrgan = getSelectedStructure(state);
+  const selectedSuit = getSelectedSuitComponent(state);
   const modeMeta = VISUALIZATION_MODES.find((m) => m.id === state.mode);
+  const activeLabel = selectedSuit
+    ? `${selectedSuit.name}${state.isolated ? " (Isolated)" : ""}`
+    : selectedOrgan
+      ? `${selectedOrgan.name}${state.isolated ? " (Isolated)" : ""}`
+      : state.suitActive
+        ? "EVA Spacesuit Assembly"
+        : "Complete Body";
+
+  const alertCount = telemetrySnapshot.alerts.length;
 
   return (
     <footer className="min-h-14 shrink-0 bg-[#051020] border-t border-cyan-500/20 px-3 py-1.5 flex flex-wrap lg:flex-nowrap items-center justify-between gap-2 lg:gap-3">
-      {/* Left: System status & selected structure */}
+      {/* Left: Platform status, active alerts & selected structure */}
       <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-slate-400">
-            Status
+        <div className="flex flex-col">
+          <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400">
+            Twin Mode
           </span>
-          <span className="text-xs font-mono text-emerald-300">ONLINE</span>
+          <span
+            className={`text-xs font-mono ${
+              state.suitActive ? "text-violet-300" : "text-emerald-300"
+            }`}
+          >
+            {state.suitActive ? "ASTRONAUT EVA" : "HUMAN ANATOMY"}
+          </span>
         </div>
+
         <div className="h-5 w-px bg-cyan-500/20" />
+
         <div className="flex flex-col">
           <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400">
             Selected Structure
           </span>
-          <span className="text-xs font-medium text-cyan-200 truncate max-w-[150px]">
-            {selected ? `${selected.name}${state.isolated ? " (Isolated)" : ""}` : "Complete Body"}
+          <span className="text-xs font-medium text-cyan-200 truncate max-w-[165px]">
+            {activeLabel}
           </span>
         </div>
+
         <div className="hidden xl:flex flex-col">
           <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400">
             Active Layer
           </span>
           <span className="text-xs font-mono text-slate-200">{modeMeta?.label}</span>
         </div>
+
+        {state.suitActive && (
+          <button
+            type="button"
+            onClick={onOpenTelemetryHud}
+            className={`px-2 py-1 border text-[10px] font-mono uppercase flex items-center gap-1 transition-colors ${
+              alertCount > 0
+                ? "bg-rose-500/20 border-rose-400 text-rose-100"
+                : "bg-[#040c18] border-cyan-500/25 text-emerald-300 hover:border-cyan-400"
+            }`}
+          >
+            {alertCount > 0 && <AlertTriangle className="w-3 h-3" />}
+            <span>{alertCount > 0 ? `${alertCount} ALERT` : "0 ALERTS"}</span>
+          </button>
+        )}
       </div>
 
       {/* Center: Camera Presets & Visualization Intensity */}
