@@ -272,8 +272,8 @@ function useModel(gltf, label) {
   buildParticles(); document.getElementById("src").textContent = `model: ${label}`;
 }
 const loader = new GLTFLoader();
-const fromFile = () => loader.load("/static/models/twin.glb", g => useModel(g, "twin.glb (Blender)"), undefined, () =>
-  loader.load("/static/models/astronaut.glb", g => useModel(g, "astronaut.glb"), undefined, () => {
+const fromFile = () => loader.load("/models/twin.glb", g => useModel(g, "twin.glb (Blender)"), undefined, () =>
+  loader.load("/models/astronaut.glb", g => useModel(g, "astronaut.glb"), undefined, () => {
     const fig = fallbackFigure(); twin.add(fig); twin.updateMatrixWorld(true);
     fig.traverse(o => { if (o.isMesh && o.material === holo) bodyMeshes.push(o); });
     Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p))); buildParticles();

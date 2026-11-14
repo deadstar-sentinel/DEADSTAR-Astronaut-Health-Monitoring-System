@@ -22,11 +22,18 @@ ledger = Ledger(ROOT.parent / "data" / "ledger.jsonl")
 
 app = FastAPI(title="DEADSTAR SENTINEL")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+app.mount("/models", StaticFiles(directory=ROOT.parent / "public" / "models"), name="models")
 
 
 @app.get("/")
 def index():
-    return FileResponse(ROOT / "static" / "index.html")
+    """The hologram twin (the same file AI Studio / Vite serves)."""
+    return FileResponse(ROOT.parent / "index.html")
+
+
+@app.get("/console")
+def console():
+    return FileResponse(ROOT / "static" / "console.html")
 
 
 @app.get("/health")

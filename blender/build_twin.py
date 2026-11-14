@@ -257,18 +257,31 @@ def mpfb_body():
         return None
     sc = bpy.context.scene
     for k, v in (("gender", "male"), ("age", "young"), ("muscle", "maxmuscle"), ("weight", "averageweight"),
-                 ("height", "average"), ("proportions", "max"), ("race", "universal")):
+                 ("height", "average"), ("proportions", "average"), ("race", "universal")):
         setattr(sc, "MPFB_NH_phenotype_" + k, v)
     sc.MPFB_NH_phenotype_influence = .65
     for k, v in (("mask_helpers", True), ("detailed_helpers", False), ("add_breast", False), ("load_clothes", False)):
         if hasattr(sc, "MPFB_NH_" + k):
             setattr(sc, "MPFB_NH_" + k, v)
     before = set(bpy.data.objects.keys())
-    bpy.ops.mpfb.create_human()
+    try:
+        bpy.ops.mpfb.create_human()
+    except Exception as e:                                # some MPFB installs lack optional target files
+        print("MPFB partial build:", e)
     made = [o for o in bpy.data.objects if o.name not in before]
     human = next((o for o in made if o.type == "MESH"), None)
     if human is None:
         return None
+    g = human.vertex_groups.get("body")                   # keep the skin only: drop helpers and joint cubes
+    if g is not None:
+        import bmesh
+        bm = bmesh.new(); bm.from_mesh(human.data)
+        dl = bm.verts.layers.deform.verify()
+        bmesh.ops.delete(bm, geom=[v for v in bm.verts if g.index not in v[dl]], context="VERTS")
+        bm.to_mesh(human.data); bm.free()
+    for m in list(human.modifiers):
+        if m.type == "MASK":
+            human.modifiers.remove(m)
     activate(human)
     bpy.ops.object.convert(target="MESH")                 # bakes body shape targets and removes masked helpers
     human = bpy.context.view_layer.objects.active
@@ -295,16 +308,38 @@ finish(body, "Body", M_SKIN, 60000)
 
 # Arm joints: measured from the realistic mesh (A-pose), or the metaball defaults (arms down).
 SH, EL, WR = {}, {}, {}
+HIP, KNEE, ANK = {}, {}, {}
+
+
+def _centroid(pts):
+    return sum(pts, Vector()) / len(pts) if pts else None
+
+
+if REALISTIC:
+    VS = [body.matrix_world @ v.co for v in body.data.vertices]
 for s in (-1, 1):
     if REALISTIC:
-        mw = body.matrix_world
-        tip = max((mw @ v.co for v in body.data.vertices), key=lambda c: s * c.x)
-        SH[s] = Vector((s * .175, 0, 1.467))
-        d = (tip - SH[s]).normalized()
-        WR[s] = tip - d * .19
-        EL[s] = SH[s] + (WR[s] - SH[s]) * .54
+        # legs: horizontal cross-sections of this side's leg
+        def leg_at(z, w=.012):
+            return _centroid([c for c in VS if abs(c.z - z) < w and .004 < s * c.x < .2])
+        HIP[s], KNEE[s], ANK[s] = leg_at(.90), leg_at(.50), leg_at(.09)
+        # arms: principal axis through the arm, then cross-section centroids along it
+        tip = max(VS, key=lambda c: s * c.x)
+        A = [c for c in VS if s * c.x > .19 and .7 < c.z < 1.5]
+        cen = _centroid(A)
+        d = (cen - tip).normalized()                       # tip -> shoulder
+        for _ in range(3):                                  # refine with the arm points themselves
+            far = [c for c in A if (c - tip).dot(d) > (cen - tip).dot(d)]
+            if far:
+                d = (_centroid(far) - tip).normalized()
+        L = max((c - tip).dot(d) for c in A)
+        def arm_at(f, w=.012):
+            t0 = L * f
+            return _centroid([c for c in A if abs((c - tip).dot(d) - t0) < w]) or tip + d * t0
+        WR[s], EL[s], SH[s] = arm_at(.19 / L if L > .19 else .25), arm_at(.56), arm_at(.93)
     else:
         SH[s], EL[s], WR[s] = Vector((s * .2, 0, 1.43)), Vector((s * .25, .01, 1.165)), Vector((s * .29, -.02, .91))
+        HIP[s], KNEE[s], ANK[s] = Vector((s * .12, 0, .915)), Vector((s * .11, -.005, .505)), Vector((s * .11, .01, .1))
 
 # ================================================================ skull, brain, eyes, ears
 skull = sphere((0, .012, 1.685), (.068, .082, .08), 48, 24)
@@ -453,11 +488,12 @@ for s in (-1, 1):
     arm += [C(tuple(SH[s]), tuple(EL[s]), .011),                                   # humerus
             C(tuple(EL[s] + Vector((0, -.006, 0))), tuple(WR[s] + Vector((0, -.006, 0))), .007),   # radius
             C(tuple(EL[s] + Vector((0, .012, 0))), tuple(WR[s] + Vector((0, .008, 0))), .0065)]    # ulna
-    leg += [C((s * .085, 0, .935), (s * .125, 0, .915), .013),                       # femoral neck
-            C((s * .12, 0, .915), (s * .11, -.01, .52), .014),                       # femur shaft
-            C((s * .11, -.005, .49), (s * .11, .01, .1), .012),                      # tibia
-            C((s * .13, .01, .48), (s * .125, .015, .11), .006),                     # fibula
-            E((s * .11, -.036, .51), (.014, .008, .016))]                            # knee cap
+    H, K, F = HIP[s], KNEE[s], ANK[s]
+    leg += [C((s * .085, H.y, .935), tuple(H + Vector((0, 0, .02))), .013),           # femoral neck
+            C(tuple(H + Vector((0, 0, .02))), tuple(K + Vector((0, 0, .02))), .014),   # femur shaft
+            C(tuple(K - Vector((0, 0, .02))), tuple(F + Vector((0, 0, .01))), .012),   # tibia
+            C(tuple(K + Vector((s * .018, .012, -.025))), tuple(F + Vector((s * .016, .012, .02))), .006),  # fibula
+            E(tuple(K + Vector((0, -.036, .005))), (.014, .008, .016))]                # knee cap
 finish(metaballs("Arms", arm, .004), "ORG_bones_arm", M_BONE, 5000)
 finish(metaballs("Legs", leg, .004), "ORG_bones_leg", M["leg"], 7000)
 
@@ -495,7 +531,7 @@ HOTSPOTS = {
     "HS_heart": (.03, -.07, 1.31), "HS_lungs_L": (.08, -.04, 1.36), "HS_lungs_R": (-.08, -.04, 1.36),
     "HS_spine": (0, .08, 1.20), "HS_gut": (0, -.08, 1.07), "HS_kidney_L": (.058, .07, 1.10), "HS_kidney_R": (-.058, .07, 1.09),
     "HS_blood": tuple(EL[-1] + Vector((0, -.03, 0))),     # inner elbow: where blood is drawn
-    "HS_hip_L": (.10, -.02, .93), "HS_hip_R": (-.10, -.02, .93), "HS_leg_L": (.11, -.05, .50), "HS_leg_R": (-.11, -.05, .50),
+    "HS_hip_L": tuple(HIP[1] + Vector((0, -.02, .03))), "HS_hip_R": tuple(HIP[-1] + Vector((0, -.02, .03))), "HS_leg_L": tuple(KNEE[1] + Vector((0, -.05, 0))), "HS_leg_R": tuple(KNEE[-1] + Vector((0, -.05, 0))),
 }
 for name, loc in HOTSPOTS.items():
     e = bpy.data.objects.new(name, None)

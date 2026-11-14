@@ -4,3 +4,5 @@ __pycache__/
 .env
 data/ledger.jsonl
 .pytest_cache/
+node_modules/
+dist/
