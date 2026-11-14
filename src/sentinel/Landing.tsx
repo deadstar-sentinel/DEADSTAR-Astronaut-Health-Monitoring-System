@@ -25,17 +25,12 @@ function useStory(): Story | null {
   useEffect(() => {
     let alive = true;
     const timer = window.setTimeout(() => alive && setS((v) => v ?? FALLBACK), 2500);
-    Promise.all([
-      fetch("/api/state").then((r) => r.json()),
-      fetch("/api/meta").then((r) => r.json()),
-      fetch("/api/validation").then((r) => r.json()).catch(() => null),
-    ])
-      .then(([st, meta, val]) => {
+    Promise.all([fetch("/api/state").then((r) => r.json()), fetch("/api/meta").then((r) => r.json())])
+      .then(([st, meta]) => {
         if (!alive) return;
         const al = (st.alerts || []).find((a: { severity: string; act_within_min?: number }) => a.severity === "act" && a.act_within_min != null && a.act_within_min < 120);
         const crew = al ? (st.crew || []).find((c: { id: string }) => c.id === al.crew) : null;
-        const row = val?.summary?.find((r: { kind: string; h: number }) => r.kind === "hourly" && r.h === 24);
-        setS({
+        setS((prev) => ({
           owltMin: st.light?.owlt_s ? st.light.owlt_s / 60 : FALLBACK.owltMin,
           actMin: al?.act_within_min ?? FALLBACK.actMin,
           earthMin: al?.earth_reply_min ?? FALLBACK.earthMin,
@@ -46,10 +41,17 @@ function useStory(): Story | null {
           risks: meta?.risks?.length ?? FALLBACK.risks,
           signals: meta?.signals ? Object.keys(meta.signals).length : FALLBACK.signals,
           sources: meta?.sources ? Object.keys(meta.sources).length : FALLBACK.sources,
-          cover80: row?.coverage80 != null ? Math.round(row.coverage80 * 100) : FALLBACK.cover80,
-        });
+          cover80: prev?.cover80 ?? FALLBACK.cover80,
+        }));
       })
-      .catch(() => alive && setS(FALLBACK));
+      .catch(() => alive && setS((v) => v ?? FALLBACK));
+    fetch("/api/validation")
+      .then((r) => r.json())
+      .then((val) => {
+        const row = val?.summary?.find((r: { kind: string; h: number }) => r.kind === "hourly" && r.h === 24);
+        if (alive && row?.coverage80 != null) setS((v) => ({ ...(v ?? FALLBACK), cover80: Math.round(row.coverage80 * 100) }));
+      })
+      .catch(() => {});
     return () => {
       alive = false;
       window.clearTimeout(timer);
@@ -133,10 +135,13 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
   const scroller = useRef<HTMLDivElement | null>(null);
   const story = useStory();
   const s = story ?? FALLBACK;
+  const live = useRef(s);
+  live.current = s;
+  const ready = story !== null;
   const title = "SENTINEL";
 
   useLayoutEffect(() => {
-    if (!story || !scroller.current || !root.current) return;
+    if (!ready || !scroller.current || !root.current) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const sc = scroller.current;
     const ctx = gsap.context(() => {
@@ -157,7 +162,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       gsap.to(".hero-bg", { yPercent: 18, ease: "none", scrollTrigger: { trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
 
       // 01 Distance: a photon crosses to Earth and back; the clock runs with your scroll.
-      const owlt = s.owltMin;
+      const owlt = live.current.owltMin;
       const clock = root.current?.querySelector(".dist-clock");
       const leg = root.current?.querySelector(".dist-leg");
       const tl = gsap.timeline({ scrollTrigger: { trigger: ".s-dist", start: "top top", end: "+=220%", scrub: 0.6, pin: true } });
@@ -175,14 +180,15 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
         .from(".dist-punch", { y: 20, opacity: 0, duration: 0.3 });
 
       // 02 Decision: the problem's deadline vs Earth's answer — then the verdict slams in.
-      const max = Math.max(s.actMin, s.earthMin) * 1.08;
+      const L = live.current;
+      const max = Math.max(L.actMin, L.earthMin) * 1.08;
       const tl2 = gsap.timeline({ scrollTrigger: { trigger: ".s-dec", start: "top top", end: "+=170%", scrub: 0.6, pin: true } });
       tl2.from(".s-dec .rv", { y: 30, opacity: 0, stagger: 0.08, duration: 0.25 })
-        .fromTo(".bar-act", { scaleX: 0 }, { scaleX: s.actMin / max, duration: 0.6, ease: "power2.out" })
-        .fromTo(".bar-earth", { scaleX: 0 }, { scaleX: s.earthMin / max, duration: 0.6, ease: "power2.out" }, "<0.15")
+        .fromTo(".bar-act", { scaleX: 0 }, { scaleX: L.actMin / max, duration: 0.6, ease: "power2.out" })
+        .fromTo(".bar-earth", { scaleX: 0 }, { scaleX: L.earthMin / max, duration: 0.6, ease: "power2.out" }, "<0.15")
         .fromTo(".verdict", { scale: 2.4, opacity: 0, filter: "blur(10px)" }, { scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.35, ease: "back.out(2)" })
         .from(".verdict-note", { y: 16, opacity: 0, duration: 0.25 });
-      ScrollTrigger.create({ trigger: ".s-dec", start: "top 30%", once: true, onEnter: () => { count(".fever-n", s.feverPct, 0, "%"); } });
+      ScrollTrigger.create({ trigger: ".s-dec", start: "top 30%", once: true, onEnter: () => { count(".fever-n", live.current.feverPct, 0, "%"); } });
 
       // 03 Twin: parallax render, anatomy callouts draw themselves in.
       gsap.fromTo(".twin-img", { yPercent: 12, scale: 1.12 }, { yPercent: -8, scale: 1, ease: "none", scrollTrigger: { trigger: ".s-twin", start: "top bottom", end: "bottom top", scrub: true } });
@@ -196,7 +202,8 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       // 04 Proof: cards rise, numbers count up once.
       gsap.from(".stat", { y: 50, opacity: 0, rotateX: -18, stagger: 0.12, duration: 1, ease: "power3.out", scrollTrigger: { trigger: ".s-proof", start: "top 70%" } });
       ScrollTrigger.create({ trigger: ".s-proof", start: "top 65%", once: true, onEnter: () => {
-        count(".n-risks", s.risks); count(".n-sig", s.signals); count(".n-cov", s.cover80, 0, "%"); count(".n-src", s.sources);
+        const v = live.current;
+        count(".n-risks", v.risks); count(".n-sig", v.signals); count(".n-cov", v.cover80, 0, "%"); count(".n-src", v.sources);
       } });
 
       // CTA
@@ -207,7 +214,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       ctx.revert();
       ScrollTrigger.defaults({ scroller: window });
     };
-  }, [story, s.owltMin, s.actMin, s.earthMin, s.feverPct, s.risks, s.signals, s.cover80, s.sources]);
+  }, [ready]);
 
   const enter = () => {
     if (!root.current) return onEnter();
