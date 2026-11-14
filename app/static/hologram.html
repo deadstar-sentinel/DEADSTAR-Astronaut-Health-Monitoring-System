@@ -239,8 +239,9 @@ function addSpot(name, pos) {
 // Blender design (blender/build_twin.py): Body skin + ORG_* anatomy + HS_* hotspots
 const bodyMeshes = [], organs = [], fxRings = [];
 let fxFromBlender = false;
-const ORG_SYS = { brain: "brain", eye: "eyes", ear: "ear", heart: "heart", lung: "lungs", spine: "spine", pelvis: "hip",
-  bones_leg: "leg", gut: "gut", kidney: "kidney", lymph: "lymph" };          // ribs, arm bones: structure only
+const ORG_SYS = { brain: "brain", eye: "eyes", ear: "ear", heart: "heart", vessels: "heart", lung: "lungs", airways: "lungs",
+  spine: "spine", pelvis: "hip", bones_leg: "leg", gut: "gut", liver: "gut", stomach: "gut", kidney: "kidney", bladder: "kidney",
+  lymph: "lymph" };                                    // skull, ribs, shoulders, arm bones: structure only
 const organColor = sy => sy && status[sy] && status[sy] !== "nom" ? LEVEL[status[sy]][0] : (sy ? "#9FEFF2" : "#CFEFF5");
 function organMat(col) {
   return new THREE.ShaderMaterial({ uniforms: { t: holo.uniforms.t, c: { value: new THREE.Color(col) }, k: { value: 1 } },
