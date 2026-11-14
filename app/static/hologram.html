@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SENTINEL · Body twin</title>
+<style>
+  html,body{margin:0;height:100%;background:#05080D;color:#E6EDF3;font:12px "IBM Plex Mono",ui-monospace,monospace;overflow:hidden}
+  #hud{position:fixed;left:12px;bottom:12px;letter-spacing:.06em}
+  #hud b{color:#5CE1E6}
+  #card{position:fixed;right:12px;top:12px;max-width:260px;padding:10px;border:1px solid #1A2430;background:#0B1118;display:none}
+  .pyr #hud,.pyr #card{display:none}
+</style>
+<!-- Offline rule: for the stage laptop, download three.module.js + addons into /static/vendor and point the import map there. -->
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<div id="hud">SENTINEL BODY TWIN · <b id="who">MORI</b> · click a hotspot · <span id="src">model: loading</span></div>
+<div id="card"></div>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const q = new URLSearchParams(location.search);
+const PYRAMID = q.get("mode") === "pyramid";          // Pepper's ghost: 4 views on black
+if (PYRAMID) document.body.classList.add("pyr");
+
+// Status colours from the visual language; the card always prints the word too (colorblind-safe).
+const LEVEL = { nom: ["#3DD68C", "NOMINAL ●"], cau: ["#F5B83D", "CAUTION ▲"], crit: ["#FF5D5D", "CRITICAL ■"] };
+const status = { lymph: "cau", eyes: "cau" };          // demo default: Mori's story
+(q.get("status") || "").split(",").filter(Boolean).forEach(p => { const [k, v] = p.split(":"); status[k] = v; });
+const sys = name => name.replace(/^HS_/, "").replace(/_[LR]$/, "");
+
+// Same hotspot coordinates as blender/build_astronaut.py (Blender Z-up -> Three Y-up: x, z, -y).
+const B = { HS_brain:[0,.01,1.70], HS_eyes_L:[-.035,-.09,1.665], HS_eyes_R:[.035,-.09,1.665], HS_lymph:[.05,-.04,1.52],
+  HS_heart:[.035,-.07,1.33], HS_lungs_L:[-.08,-.04,1.36], HS_lungs_R:[.08,-.04,1.36], HS_spine:[0,.08,1.20],
+  HS_gut:[0,-.08,1.07], HS_hip_L:[-.10,-.02,.93], HS_hip_R:[.10,-.02,.93], HS_leg_L:[-.11,-.05,.50], HS_leg_R:[.11,-.05,.50] };
+const toThree = ([x, y, z]) => new THREE.Vector3(x, z, -y);
+
+const scene = new THREE.Scene();
+const twin = new THREE.Group(); scene.add(twin);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: PYRAMID });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+
+const holo = new THREE.ShaderMaterial({
+  uniforms: { t: { value: 0 }, c: { value: new THREE.Color("#5CE1E6") } },
+  vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
+    void main(){ vec4 w = modelMatrix*vec4(position,1.); vY = w.y;
+      vN = normalize(normalMatrix*normal); vec4 mv = viewMatrix*w; vV = normalize(-mv.xyz);
+      gl_Position = projectionMatrix*mv; }`,
+  fragmentShader: `uniform float t; uniform vec3 c; varying vec3 vN; varying vec3 vV; varying float vY;
+    void main(){ float rim = pow(1.-abs(dot(vN,vV)), 2.2);
+      float scan = smoothstep(.85,1.,sin(vY*180.-t*3.))*.18;
+      float sweep = smoothstep(.04,0.,abs(fract(t*.12)*2.-vY));
+      float flick = .94+.06*sin(t*37.);
+      gl_FragColor = vec4(c*(rim*1.4+scan+sweep*.8+.06)*flick, (rim*.85+scan+sweep*.5+.05)*flick); }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+});
+
+const spots = [];
+function addSpot(name, pos) {
+  const lv = LEVEL[status[sys(name)] || "nom"];
+  const m = new THREE.Mesh(new THREE.SphereGeometry(.022, 16, 12), new THREE.MeshBasicMaterial({ color: lv[0], transparent: true }));
+  m.position.copy(pos); m.userData.name = name; twin.add(m); spots.push(m);
+}
+
+function fallbackFigure() {   // built-in figure if astronaut.glb is missing
+  const g = new THREE.Group(), cap = (a, b, r) => { const A = toThree(a), Bv = toThree(b), d = Bv.clone().sub(A);
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, d.length(), 8, 16), holo);
+    m.position.copy(A.clone().add(Bv).multiplyScalar(.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize()); g.add(m); };
+  const ball = (c, s) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), holo); m.position.copy(toThree(c)); m.scale.set(s[0], s[2], s[1]); g.add(m); };
+  ball([0,0,1.66],[.09,.1,.12]); cap([0,0,1.5],[0,0,1.56],.055); ball([0,0,1.33],[.19,.12,.2]); ball([0,0,1.1],[.16,.11,.15]); ball([0,0,.96],[.18,.12,.1]);
+  for (const s of [-1, 1]) { cap([s*.21,0,1.44],[s*.26,0,1.16],.052); cap([s*.26,0,1.16],[s*.29,0,.9],.042);
+    cap([s*.095,0,.92],[s*.11,0,.5],.078); cap([s*.11,0,.5],[s*.11,0,.09],.058); }
+  return g;
+}
+
+new GLTFLoader().load("/static/models/astronaut.glb", gltf => {
+  gltf.scene.traverse(o => { if (o.isMesh) o.material = holo; if (o.name.startsWith("HS_")) { const p = new THREE.Vector3(); o.getWorldPosition(p); addSpot(o.name, p); } });
+  twin.add(gltf.scene); document.getElementById("src").textContent = "model: astronaut.glb (Blender)";
+}, undefined, () => {
+  twin.add(fallbackFigure()); Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p)));
+  document.getElementById("src").textContent = "model: built-in fallback";
+});
+twin.position.y = -0.9;
+
+// ---- cameras ----
+const cams = [0, 90, 180, 270].map(deg => { const c = new THREE.PerspectiveCamera(30, 1, .1, 20), a = THREE.MathUtils.degToRad(deg);
+  c.position.set(Math.sin(a) * 4.2, .1, Math.cos(a) * 4.2); c.lookAt(0, 0, 0); return c; });
+const main = cams[0];
+
+let out2d, ctx;
+if (PYRAMID) { out2d = document.createElement("canvas"); document.body.appendChild(out2d); ctx = out2d.getContext("2d"); }
+else document.body.appendChild(renderer.domElement);
+
+function resize() {
+  const W = innerWidth, H = innerHeight;
+  if (PYRAMID) { const S = Math.min(W, H); out2d.width = out2d.height = S; out2d.style.cssText = `position:absolute;left:${(W-S)/2}px;top:${(H-S)/2}px`;
+    renderer.setSize(S / 3, S / 3, false); cams.forEach(c => { c.aspect = 1; c.updateProjectionMatrix(); }); }
+  else { renderer.setSize(W, H); main.aspect = W / H; main.updateProjectionMatrix(); }
+}
+addEventListener("resize", resize); resize();
+
+// ---- click a hotspot -> card ----
+const ray = new THREE.Raycaster(), card = document.getElementById("card");
+renderer.domElement.addEventListener("click", e => {
+  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), main);
+  const hit = ray.intersectObjects(spots)[0];
+  if (!hit) { card.style.display = "none"; return; }
+  const s = sys(hit.object.userData.name), lv = LEVEL[status[s] || "nom"];
+  card.innerHTML = `<div style="color:#8A99A8;letter-spacing:.08em">${s.toUpperCase()}</div><div style="color:${lv[0]};margin:4px 0">${lv[1]}</div>
+    <div style="color:#8A99A8">Forecast panel for this system opens here (engine: forecast.py).</div>`;
+  card.style.display = "block";
+  dispatchEvent(new CustomEvent("sentinel:hotspot", { detail: s }));
+});
+
+// Hook for the console: setStatus("eyes", "crit")
+window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) m.material.color.set(LEVEL[l][0]); }); } };
+
+// ---- loop ----
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const t = clock.getElapsedTime();
+  holo.uniforms.t.value = t; twin.rotation.y = t * .25;
+  spots.forEach((m, i) => { const pulse = status[sys(m.userData.name)] && status[sys(m.userData.name)] !== "nom";
+    m.scale.setScalar(pulse ? 1 + .35 * Math.sin(t * 4 + i) : 1); });
+  if (!PYRAMID) { renderer.render(scene, main); return; }
+  const S = out2d.width, s = S / 3; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, S, S);
+  // heads point outward; four views: front, right side, back, left side
+  [[S/2, s/2, 0], [S - s/2, S/2, 90], [S/2, S - s/2, 180], [s/2, S/2, 270]].forEach(([x, y, rot], i) => {
+    renderer.render(scene, cams[i]); ctx.save(); ctx.translate(x, y); ctx.rotate(rot * Math.PI / 180);
+    ctx.drawImage(renderer.domElement, -s/2, -s/2, s, s); ctx.restore(); });
+});
+</script>
+</body>
+</html>
