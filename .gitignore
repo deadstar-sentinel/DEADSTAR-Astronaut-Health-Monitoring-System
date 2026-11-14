@@ -1,8 +1,11 @@
 __pycache__/
 *.pyc
 .venv/
+venv/
 .env
-data/ledger.jsonl
-.pytest_cache/
+.DS_Store
+*.log
+
+# AI Studio / Vite preview
 node_modules/
 dist/

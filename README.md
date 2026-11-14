@@ -1,48 +1,64 @@
 # DEADSTAR SENTINEL
 
-**An autonomous flight surgeon that flies with the crew.**
-NASA Space Apps Challenge 2026 · Kuwait · *Create Health Monitoring Software for Astronauts on Space Missions*
+**On Mars, the doctor is up to 22 light-minutes away. SENTINEL is not.**
 
-> On Mars, the doctor is up to 22 light-minutes away. SENTINEL is not.
+SENTINEL is an autonomous medical officer and predictive digital twin for astronauts on missions beyond real-time reach of Earth. It forecasts each crew member's health from 24 hours to mission end with calibrated confidence, explains every alert in the language of NASA's 17 Human Research Program risks, tells the crew whether a problem is the **ship or their body**, and acts onboard when Earth's answer would arrive too late.
 
-SENTINEL keeps a digital twin of every astronaut, forecasts their health with calibrated uncertainty, explains every alert in NASA's 17-risk language, and tells the crew when Earth's answer cannot arrive in time.
+Built for the NASA Space Apps Challenge 2026 — *Create Health Monitoring Software for Astronauts on Space Missions* — Kuwait local event, Team DEADSTAR.
 
-## What is in this skeleton
+## What it does
 
-| Path | Status | What it is |
-| --- | --- | --- |
-| `app/engine/constants.py` | working | Every constant with its source and a `verified` flag |
-| `app/engine/lightdelay.py` | working, tested | Live Earth–Mars light time from JPL elements + the light-cone rule |
-| `app/engine/ledger.py` | working, tested | Hash-chained forecast ledger (forecasts are pre-registered) |
-| `app/engine/isolator.py` | working, tested | Ship vs. body: common-mode rejection across the crew |
-| `app/engine/synth.py` | spec + stub | Synthetic crew simulator, separate from the forecaster |
-| `app/engine/forecast.py` | spec + stub | Multi-horizon forecasts with conformal bands |
-| `app/engine/backtest.py` | spec + stub | Scorecard and reliability diagram, from the ledger only |
-| `app/engine/decide.py` | spec + stub | Early warning, 17 HRP risks, EVA GO/NO-GO poll, what-if, inventory, DONKI |
-| `app/main.py` | working | FastAPI service: `/health`, `/api/lightdelay`, `/api/constants`, `/api/ledger/verify` |
-| `app/static/index.html` | shell | Console shell: MET clock, live light delay, Methods table |
-| `data/inventory.json` | sample | Synthetic medical kit (placeholders) |
+| | |
+|---|---|
+| **Multi-horizon forecasts** | 24 h · 48 h · 72 h · 7 d · 30 d · 90 d · mission end, each with 80 % and 95 % bands |
+| **Measured accuracy** | Rolling-origin backtests for every astronaut and signal; skill vs. a naive forecast and interval coverage on held-out data, shown in the app |
+| **Threshold probabilities** | "P(fever ≥ 38.0 °C in 24 h)", "P(≥ 10 % hip bone loss by mission end)", "P(optic nerve sheath ≥ 6 mm)" |
+| **Early warning** | Circadian- and sleep-adjusted anomaly detection; an infection-like pattern is flagged hours before fever |
+| **Ship vs. body** | Crew-wide deviations with cabin CO₂ above NASA's 3 mmHg 1-hour limit → the ship; one person's deviation with normal air → the body |
+| **Light-delay autonomy** | Today's real Earth–Mars light time from JPL orbital elements; SENTINEL acts onboard when round trip + ground time exceeds the action deadline |
+| **17 HRP risks** | Every score maps to NASA's own risk page |
+| **What-if countermeasures** | Exercise, sleep, bisphosphonates, B-vitamins (NASA B-Complex), thigh cuffs (NASA Thigh Cuff), storm-shelter compliance |
+| **Holographic body twin** | Three.js hologram, organs coloured by risk, heart beating at the live heart rate, mission-day morph (fluid shift, leg and bone loss); Pepper's-ghost mode for a tablet pyramid |
+| **Astronaut self-view** | Phone view in plain language: health forecast, tap where it hurts, routine measurements (blood pressure, blood sugar, mood), reaction test, guided self-exam with voice |
+| **Voice medical officer** | Ask by voice or text; answers grounded in the computed numbers (Claude if `ANTHROPIC_API_KEY` is set, a rules engine otherwise) |
+| **Live NASA space weather** | DONKI solar energetic particles, flares, CMEs + NOAA GOES protons; cached real events if offline |
+| **Bring your own data** | CSV upload with automatic column mapping; forecasts recompute on real data |
 
-## Run
+## Pages
+
+- `/` — flight-surgeon console
+- `/astronaut` — astronaut self-view (phone)
+- `/holo` — Pepper's-ghost hologram (four views; put a clear pyramid on a tablet)
+
+Keys on the console: **1** baseline · **2** CO₂ scrubber degradation · **3** solar particle event · **4** crew fatigue · **B** spoken briefing.
+
+## Run locally (works offline)
 
 ```bash
 pip install -r requirements.txt
-uvicorn app.main:app --reload        # http://localhost:8000
-pytest -q
+uvicorn app.main:app --port 8000
+# open http://localhost:8000
 ```
 
-**Railway:** connect this repo; the `Procfile` starts the service. Variables: `SENTINEL_ROLE=earth`, `NASA_API_KEY=<your api.nasa.gov key>`.
-**On stage:** run a second copy on the laptop with `SENTINEL_ROLE=ship`, then turn Wi-Fi off. The ship keeps working; the Earth link shows LOS.
+Fonts and 3D libraries are bundled; only live space weather needs the internet.
 
-## Honesty rules (Validity is judged)
+## Deploy
 
-- Synthetic crew calibrated to NASA-published rates. Names are fictional. Never presented as real astronaut data.
-- Decision support, never diagnosis. SENTINEL starts the onboard protocol and alerts the crew; the crew medical officer confirms.
-- Accuracy numbers come only from the ledger-based backtest, labelled "pipeline validation on a synthetic crew" until real data is uploaded.
-- Every constant shows its source; unverified ones are flagged on screen until a teammate checks them.
+Railway auto-detects Python (`railway.json`, `Procfile`). Optional variables: `NASA_API_KEY` (defaults to `DEMO_KEY`), `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `DEFAULT_MISSION` (`mars_transit` · `mars_surface` · `artemis` · `iss`).
 
-## NASA sources
+## 3D models
 
-NASA HRP Risks · NASA HRP Ongoing Research · HRP Evidence Report: Bone · Curiosity MSL/RAD (Zeitlin et al. 2013) · NASA Twins Study (2019) · Inspiration4 data on OSDR · NASA DONKI · JPL Approximate Positions of the Planets.
+- `static/models/z2.glb` — NASA Z2 exploration spacesuit, from [NASA 3D Resources](https://github.com/nasa/NASA-3D-Resources) (textures resized).
+- `static/models/body.glb` — rigged human figure ("X Bot", Mixamo, via the three.js examples). To use a Blender model instead, export a Mixamo-rigged character over this file; the skeleton, organs and tap targets bind to its bones.
 
-Team: KCST, Kuwait. Built with AI assistance (Claude); disclosed on the submission page.
+Views: Hologram · Realistic · X-ray, each in cabin or in the EVA suit, with suit-vs-cabin telemetry and a decompression-sickness check.
+
+## Live pulse sensor (optional)
+
+Any serial device that prints `{"hr":72,"spo2":98}` or `HR:72,SPO2:98` per line at 115200 baud (e.g. ESP32 + MAX30102) connects through **Live sensor** in Chrome/Edge.
+
+## Honesty
+
+Crew data is synthetic, calibrated to NASA-published rates; names are fictional. What-if effect sizes are literature-informed estimates; B-Complex and Thigh Cuff effects are hypotheses under test. SENTINEL is decision support, not a medical device.
+
+See [`docs/METHODS.md`](docs/METHODS.md) and [`docs/DATASETS.md`](docs/DATASETS.md).
