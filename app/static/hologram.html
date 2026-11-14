@@ -58,7 +58,7 @@
 <body>
 <div class="bar" id="topbar"></div><div class="bar" id="botbar"></div>
 <div id="title">SENTINEL · DIGITAL TWIN · <span id="met">MET 150/04:12:00</span><b>FLIGHT ENGINEER MORI</b></div>
-<div id="hud">BODY TWIN · <b>MORI</b> · <span id="src">model: loading</span> · C: cinema · P: pyramid</div>
+<div id="hud">BODY TWIN · <b>MORI</b> · <span id="src">model: loading</span> · drag to rotate · scroll/pinch to zoom · tap an organ · C cinema · P pyramid</div>
 <div id="card"></div>
 <svg id="ro-svg"></svg>
 <div id="strip">
@@ -76,6 +76,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { MeshSurfaceSampler } from "three/addons/math/MeshSurfaceSampler.js";
 
 const q = new URLSearchParams(location.search);
 const PYRAMID = q.get("mode") === "pyramid";
@@ -134,6 +135,16 @@ const TWIN = {
     q: "P(leg strength −15 % by day 90)", p: .21, band: [.11, .34], horizon: "90 d", ttt_h: null,
     lead: "No pattern detected", sig: ["Leg strength −3.9 % since launch"], act: "Keep exercise at plan.", prior: true,
     chart: { mu: 0, sd: .8, drift: -.03, thr: -15, dir: -1, unit: "% leg strength" } },
+  ear: { lv: "nom", name: "Disorientation at Mars landing", hrp: "Altered sensorimotor and vestibular function",
+    q: "P(severe motion sickness in first 48 h on Mars)", p: .27, band: [.15, .41], horizon: "landing + 48 h", ttt_h: null,
+    lead: "Vestibular adaptation tracked since launch", sig: ["Head-movement test: adapted", "Gravity transition in 64 d"], prior: true,
+    act: "Pre-landing adaptation training from day 200. Anti-nausea medicine aboard.",
+    chart: { mu: 2, sd: .5, drift: .006, thr: 6, dir: 1, unit: "/10 symptom score" } },
+  kidney: { lv: "cau", name: "Kidney stone risk", hrp: "Spaceflight-induced bone changes (calcium released from bone)",
+    q: "P(stone-risk index above limit within 30 d)", p: .29, band: [.17, .43], horizon: "30 d", ttt_h: 410,
+    lead: "Urine calcium rising since day 60", sig: ["Urine calcium +22 % since launch", "Fluid intake 2.1 L/day"],
+    act: "Raise fluids to at least 2.5 L/day. Discuss potassium citrate with the flight surgeon.",
+    chart: { mu: 1, sd: .08, drift: .004, thr: 1.5, dir: 1, unit: "risk index" } },
 };
 const status = Object.fromEntries(Object.entries(TWIN).map(([k, v]) => [k, v.lv]));
 let oneWayS = 660;            // updated from /api/lightdelay; 11.0 min is today's computed value
@@ -144,7 +155,8 @@ const sys = n => n.replace(/^HS_/, "").replace(/_[LR]$/, "");
 // Hotspots, same coordinates as blender/build_astronaut.py (Blender Z-up -> Three Y-up)
 const B = { HS_brain:[0,.01,1.70], HS_eyes_L:[-.035,-.09,1.665], HS_eyes_R:[.035,-.09,1.665], HS_lymph:[.05,-.04,1.52],
   HS_heart:[.035,-.07,1.33], HS_lungs_L:[-.08,-.04,1.36], HS_lungs_R:[.08,-.04,1.36], HS_spine:[0,.08,1.20],
-  HS_gut:[0,-.08,1.07], HS_hip_L:[-.10,-.02,.93], HS_hip_R:[.10,-.02,.93], HS_leg_L:[-.11,-.05,.50], HS_leg_R:[.11,-.05,.50] };
+  HS_gut:[0,-.08,1.07], HS_hip_L:[-.10,-.02,.93], HS_hip_R:[.10,-.02,.93], HS_leg_L:[-.11,-.05,.50], HS_leg_R:[.11,-.05,.50],
+  HS_ear_L:[-.08,0,1.655], HS_ear_R:[.08,0,1.655], HS_kidney_L:[-.058,.07,1.10], HS_kidney_R:[.058,.07,1.10] };
 const toThree = ([x, y, z]) => new THREE.Vector3(x, z, -y);
 
 // ---------- renderer ----------
@@ -224,16 +236,87 @@ function addSpot(name, pos) {
   }
 }
 
-new GLTFLoader().load("/static/models/astronaut.glb", gltf => {
+// Blender design (blender/build_twin.py): Body skin + ORG_* anatomy + HS_* hotspots
+const bodyMeshes = [], organs = [], fxRings = [];
+let fxFromBlender = false;
+const ORG_SYS = { brain: "brain", eye: "eyes", ear: "ear", heart: "heart", lung: "lungs", spine: "spine", pelvis: "hip",
+  bones_leg: "leg", gut: "gut", kidney: "kidney", lymph: "lymph" };          // ribs, arm bones: structure only
+const organColor = sy => sy && status[sy] && status[sy] !== "nom" ? LEVEL[status[sy]][0] : (sy ? "#9FEFF2" : "#CFEFF5");
+function organMat(col) {
+  return new THREE.ShaderMaterial({ uniforms: { t: holo.uniforms.t, c: { value: new THREE.Color(col) }, k: { value: 1 } },
+    vertexShader: holo.vertexShader,
+    fragmentShader: `uniform vec3 c; uniform float k; varying vec3 vN; varying vec3 vV;
+      void main(){ float rim = pow(1.-abs(dot(vN,vV)), 1.8); float a = (rim*.85 + .12)*k; gl_FragColor = vec4(c*a*1.3, a); }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+}
+function useModel(gltf, label) {
   const meshes = [], hs = [];
   gltf.scene.traverse(o => { if (o.isMesh) meshes.push(o); if (o.name.startsWith("HS_")) hs.push(o); });
-  meshes.forEach(dress);
-  hs.forEach(o => { const p = new THREE.Vector3(); o.getWorldPosition(p); addSpot(o.name, p); });
-  twin.add(gltf.scene); document.getElementById("src").textContent = "model: astronaut.glb";
-}, undefined, () => {
-  twin.add(fallbackFigure()); Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p)));
-  document.getElementById("src").textContent = "model: built-in";
-});
+  meshes.forEach(m => {
+    if (m.name.startsWith("ORG_")) {
+      const key = m.name.slice(4).replace(/_[LR]$/, ""), sy = ORG_SYS[key] || null;
+      m.material = organMat(organColor(sy)); if (!sy) m.material.uniforms.k.value = .55;
+      m.userData = { sys: sy, key, base: m.scale.clone() }; organs.push(m);
+    } else if (m.name.startsWith("FX_")) {                  // Blender-designed projector replaces the code-built one
+      if (m.name === "FX_beam") m.material = beam.material;
+      else { m.material = organMat("#5CE1E6"); m.material.uniforms.k.value = .9; if (m.name.startsWith("FX_ring")) fxRings.push(m); }
+      fxFromBlender = true;
+    } else { dress(m); bodyMeshes.push(m); }
+  });
+  if (fxFromBlender) { disc.visible = false; beam.visible = false; rings.forEach(r => r.visible = false); }
+  twin.add(gltf.scene); twin.updateMatrixWorld(true);
+  const have = new Set(hs.map(o => o.name));
+  hs.forEach(o => { const p = new THREE.Vector3(); o.getWorldPosition(p); twin.worldToLocal(p); addSpot(o.name, p); });
+  Object.entries(B).forEach(([n, p]) => { if (!have.has(n)) addSpot(n, toThree(p)); });
+  buildParticles(); document.getElementById("src").textContent = `model: ${label}`;
+}
+const loader = new GLTFLoader();
+loader.load("/static/models/twin.glb", g => useModel(g, "twin.glb (Blender)"), undefined, () =>
+  loader.load("/static/models/astronaut.glb", g => useModel(g, "astronaut.glb"), undefined, () => {
+    const fig = fallbackFigure(); twin.add(fig); twin.updateMatrixWorld(true);
+    fig.traverse(o => { if (o.isMesh && o.material === holo) bodyMeshes.push(o); });
+    Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p))); buildParticles();
+    document.getElementById("src").textContent = "model: built-in (run blender/build_twin.py for full anatomy)";
+  }));
+
+// ---------- particle skin: ~22k points sampled on the body; they ripple and glow where you touch ----------
+const pMat = new THREE.ShaderMaterial({
+  uniforms: { t: holo.uniforms.t, c: { value: CYAN }, uTouch: { value: new THREE.Vector3(0, -10, 0) }, uAmt: { value: 0 },
+    uPix: { value: Math.min(devicePixelRatio, 2) * 2.4 } },
+  vertexShader: `uniform float t; uniform vec3 uTouch; uniform float uAmt; uniform float uPix; attribute vec3 aN; attribute float aR; varying float vG;
+    void main(){ vec3 p = position; float d = distance(p, uTouch); float push = uAmt*exp(-d*d/.005);
+      p += aN*(push*.045 + .002*sin(t*1.7 + aR*30.));
+      float sy = mod(t*.35, 2.6) - .1; float sweep = exp(-pow((p.y - sy)*24., 2.));
+      vG = .32 + push*1.6 + sweep*.9 + .12*sin(t*2.3 + aR*50.);
+      vec4 mv = modelViewMatrix*vec4(p, 1.); gl_PointSize = (1.3 + push*2.6 + sweep*.8)*uPix/(-mv.z);
+      gl_Position = projectionMatrix*mv; }`,
+  fragmentShader: `uniform vec3 c; varying float vG; void main(){ float r = length(gl_PointCoord - .5); if (r > .5) discard;
+      float a = smoothstep(.5, .05, r)*vG; gl_FragColor = vec4(c*a*1.4, a); }`,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+let particles = null;
+function buildParticles() {
+  if (PYRAMID || !bodyMeshes.length) return;
+  const inv = new THREE.Matrix4().copy(twin.matrixWorld).invert(), TOTAL = 22000;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const mats = bodyMeshes.map(m => { m.updateWorldMatrix(true, false); return new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld); });
+  const areas = bodyMeshes.map((m, k) => { const pos = m.geometry.attributes.position, idx = m.geometry.index, n = idx ? idx.count : pos.count;
+    let A = 0;
+    for (let i = 0; i + 2 < n; i += 3) {
+      const i0 = idx ? idx.getX(i) : i, i1 = idx ? idx.getX(i + 1) : i + 1, i2 = idx ? idx.getX(i + 2) : i + 2;
+      a.fromBufferAttribute(pos, i0).applyMatrix4(mats[k]); b.fromBufferAttribute(pos, i1).applyMatrix4(mats[k]); c.fromBufferAttribute(pos, i2).applyMatrix4(mats[k]);
+      A += b.sub(a).cross(c.sub(a)).length() / 2; }
+    return A; });
+  const sum = areas.reduce((x, y) => x + y, 0) || 1, P = [], Nn = [], R = [], p = new THREE.Vector3(), nn = new THREE.Vector3();
+  bodyMeshes.forEach((m, k) => { const cnt = Math.round(TOTAL * areas[k] / sum); if (!cnt) return;
+    const smp = new MeshSurfaceSampler(m).build(), NM = new THREE.Matrix3().getNormalMatrix(mats[k]);
+    for (let i = 0; i < cnt; i++) { smp.sample(p, nn); p.applyMatrix4(mats[k]); nn.applyMatrix3(NM).normalize();
+      P.push(p.x, p.y, p.z); Nn.push(nn.x, nn.y, nn.z); R.push(Math.random()); } });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute("aN", new THREE.Float32BufferAttribute(Nn, 3)); g.setAttribute("aR", new THREE.Float32BufferAttribute(R, 1));
+  particles = new THREE.Points(g, pMat); particles.frustumCulled = false; twin.add(particles);
+  holo.uniforms.c.value = CYAN.clone().multiplyScalar(.45);      // skin becomes a faint shell; particles carry the body
+}
 
 // ---------- emitter: base disc, rings, light beam, rising motes ----------
 const emitter = new THREE.Group(); emitter.position.y = -0.92; scene.add(emitter);
@@ -250,9 +333,9 @@ const rings = [[.56, .565, .5], [.66, .663, .25], [.38, .384, .35]].map(([r0, r1
   const m = add(new THREE.RingGeometry(r0, r1, 128, 1, 0, Math.PI * 1.6), glow(o)); m.rotation.x = -Math.PI / 2; return m; });
 const beam = add(new THREE.CylinderGeometry(.44, .5, 2.9, 64, 1, true), new THREE.ShaderMaterial({
   uniforms: { c: { value: CYAN }, t: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-  vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-  fragmentShader: `uniform vec3 c; uniform float t; varying vec2 vU; void main(){
-    float a = pow(1.-vU.y, 2.2)*.16*(.85+.15*sin(vU.x*60.+t*.8)); gl_FragColor = vec4(c*a, a); }` }));
+  vertexShader: `varying vec2 vU; varying float vH; void main(){ vU = uv; vH = (position.y + 1.45) / 2.9; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader: `uniform vec3 c; uniform float t; varying vec2 vU; varying float vH; void main(){
+    float a = pow(1.-clamp(vH,0.,1.), 2.2)*.16*(.85+.15*sin(vU.x*60.+t*.8)); gl_FragColor = vec4(c*a, a); }` }));
 beam.position.y = 1.45;
 const N = 260, mp = new Float32Array(N * 3), seed = new Float32Array(N);
 for (let i = 0; i < N; i++) { const r = Math.sqrt(Math.random()) * .42, a = Math.random() * 6.283;
@@ -307,16 +390,47 @@ const ray = new THREE.Raycaster(), card = document.getElementById("card");
 let focus = null, orbitT = 0;
 const camGoal = new THREE.Vector3(0, .12, 3.7), lookGoal = new THREE.Vector3(), look = new THREE.Vector3();
 cam.position.copy(camGoal);
-renderer.domElement.addEventListener("click", e => {
-  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), cam);
-  const hit = ray.intersectObjects(spots, true)[0];      // halos make the targets easy to hit
-  if (!hit) { focus = null; card.classList.remove("on"); document.body.classList.remove("card-on"); return; }
-  const obj = hit.object.userData.name ? hit.object : hit.object.parent;
-  const s = sys(obj.userData.name);
-  focus = obj; showCard(s);
+// ---------- touch: drag to rotate, scroll or pinch to zoom, tap an organ for its forecast, double-tap to reset ----------
+let userYaw = 0, userTilt = 0, zoom = 1, idleT = -99, drag = null, currentSys = null;
+const ptrs = new Map(), cv = renderer.domElement; cv.style.touchAction = "none";
+const ndc = (x, y) => new THREE.Vector2(x / innerWidth * 2 - 1, -y / innerHeight * 2 + 1);
+function touchAt(x, y) {
+  if (!particles) return;
+  ray.setFromCamera(ndc(x, y), cam);
+  const h = ray.intersectObjects(bodyMeshes, false)[0]; if (!h) return;
+  pMat.uniforms.uTouch.value.copy(twin.worldToLocal(h.point.clone())); pMat.uniforms.uAmt.value = 1;
+}
+function closeCard() { focus = null; currentSys = null; card.classList.remove("on"); document.body.classList.remove("card-on"); }
+function tap(x, y) {
+  ray.setFromCamera(ndc(x, y), cam);
+  const hit = ray.intersectObjects([...spots, ...organs], true).find(h => h.object.userData.sys ||
+    h.object.userData.name || (h.object.parent && h.object.parent.userData && h.object.parent.userData.name));
+  if (!hit) { closeCard(); return; }
+  const o = hit.object; let s, spot;
+  if (o.userData.sys) { s = o.userData.sys; spot = Object.values(spotByName).find(m => sys(m.userData.name) === s); }
+  else { spot = o.userData.name ? o : o.parent; s = sys(spot.userData.name); }
+  focus = spot || null; showCard(s); touchAt(x, y);
   dispatchEvent(new CustomEvent("sentinel:hotspot", { detail: s }));
+}
+cv.addEventListener("pointerdown", e => { ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  drag = { x: e.clientX, y: e.clientY, moved: false, pinch: 0 }; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", e => {
+  touchAt(e.clientX, e.clientY);
+  if (!ptrs.has(e.pointerId) || !drag) return;
+  const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (ptrs.size === 2) { const [p1, p2] = [...ptrs.values()], d = Math.hypot(p1[0] - p2[0], p1[1] - p2[1]);
+    if (drag.pinch) zoom = THREE.MathUtils.clamp(zoom * drag.pinch / d, .45, 1.6); drag.pinch = d; drag.moved = true; idleT = clock.getElapsedTime(); return; }
+  if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 6) drag.moved = true;
+  if (drag.moved) { userYaw += (e.clientX - prev[0]) * .008; userTilt = THREE.MathUtils.clamp(userTilt + (e.clientY - prev[1]) * .004, -.6, .8);
+    idleT = clock.getElapsedTime(); }
 });
-addEventListener("keydown", e => { if (e.key === "Escape") { focus = null; card.classList.remove("on"); document.body.classList.remove("card-on"); } });
+cv.addEventListener("pointerup", e => { ptrs.delete(e.pointerId);
+  if (drag && !drag.moved && !ptrs.size) tap(e.clientX, e.clientY); if (!ptrs.size) drag = null; });
+cv.addEventListener("pointercancel", e => { ptrs.delete(e.pointerId); if (!ptrs.size) drag = null; });
+cv.addEventListener("wheel", e => { e.preventDefault(); zoom = THREE.MathUtils.clamp(zoom * (1 + e.deltaY * .001), .45, 1.6);
+  idleT = clock.getElapsedTime(); }, { passive: false });
+cv.addEventListener("dblclick", () => { userYaw = 0; userTilt = 0; zoom = 1; closeCard(); });
+addEventListener("keydown", e => { if (e.key === "Escape") closeCard(); });
 
 // Forecast chart: history solid, forecast dashed, 95 % band light, 80 % band darker, NOW rule, threshold dashed.
 function chartSVG(c, col) {
@@ -360,10 +474,11 @@ function showCard(s) {
     <div class="row"><span class="k">Light cone</span><span>${light[0]}<br><b style="color:${col};font-weight:500">${light[1]}</b></span></div>
     <div class="act">${d.act}</div>
     <div class="foot">SIMULATED CREW · DEMO VALUES · DECISION SUPPORT, NOT DIAGNOSIS · ESC TO CLOSE</div>`;
-  card.classList.add("on"); document.body.classList.add("card-on");
+  card.classList.add("on"); document.body.classList.add("card-on"); currentSys = s;
 }
 window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) {
-  m.material.color.set(LEVEL[l][0]); m.userData.halo.material.color.set(LEVEL[l][0]); } }); } };
+  m.material.color.set(LEVEL[l][0]); m.userData.halo.material.color.set(LEVEL[l][0]); } });
+  organs.forEach(o => { if (o.userData.sys === s) o.material.uniforms.c.value.set(organColor(s)); }); } };
 
 // ---------- live readouts around the body (SIMULATED crew values, labelled on screen) ----------
 const live = { hr: 67, hrv: 41, sbp: 118, dbp: 76, temp: 37.46, spo2: 97.4, resp: 17, alert: 83.2, rt: 326,
@@ -471,9 +586,16 @@ renderer.setAnimationLoop(() => {
   const t = clock.getElapsedTime();
   holo.uniforms.t.value = t; beam.material.uniforms.t.value = t; grade.uniforms.t.value = t;
   rings.forEach((r, i) => r.rotation.z = t * (i % 2 ? -.12 : .08) * (i + 1));
+  fxRings.forEach((r, i) => r.rotation.y = t * (i % 2 ? -.12 : .08) * (i + 1));
   const p = motesGeo.attributes.position.array;
   for (let i = 0; i < N; i++) { p[i * 3 + 1] += seed[i] * .006; if (p[i * 3 + 1] > 2.6) p[i * 3 + 1] = 0; }
   motesGeo.attributes.position.needsUpdate = true;
+  pMat.uniforms.uAmt.value *= .95;
+  const beat = 1 + .075 * ecgWave((t * live.hr / 60) % 1), breath = Math.sin(t * 2 * Math.PI * live.resp / 60);
+  organs.forEach(o => { const b = o.userData.base, key = o.userData.key;
+    const k = key === "heart" ? beat : 1, sx = key === "lung" ? 1 + .03 * breath : 1, sy = key === "lung" ? 1 + .045 * breath : 1;
+    o.scale.set(b.x * k * sx, b.y * k * sy, b.z * k * sx);
+    o.material.uniforms.k.value = (o.userData.sys ? 1 : .55) * (currentSys ? (currentSys === o.userData.sys ? 1.9 : .45) : 1); });
   spots.forEach((m, i) => { const alert = status[sys(m.userData.name)] && status[sys(m.userData.name)] !== "nom";
     m.userData.halo.scale.setScalar(alert ? .09 + .05 * (.5 + .5 * Math.sin(t * 3.2 + i)) : .05); });
   const s = 150 * 86400 + 4 * 3600 + 12 * 60 + t;
@@ -488,11 +610,12 @@ renderer.setAnimationLoop(() => {
     return;
   }
   // slow cinematic orbit; when a hotspot is tapped, glide in and hold on it
-  if (!focus) orbitT += 1 / 60;
-  const a = orbitT * .11, r = 3.7 + .35 * Math.sin(orbitT * .07);
+  if (!focus && t - idleT > 6) orbitT += 1 / 60;          // auto-orbit pauses while you touch
+  twin.rotation.y = userYaw;
+  const a = orbitT * .11, r = (3.7 + .35 * Math.sin(orbitT * .07)) * zoom;
   if (focus) { focus.getWorldPosition(v);
-    camGoal.set(v.x + Math.sin(a) * 1.15, v.y + .06, v.z + Math.cos(a) * 1.15); lookGoal.copy(v).add(new THREE.Vector3(.18, 0, 0)); }
-  else { camGoal.set(Math.sin(a) * r, .12 + .28 * Math.sin(orbitT * .05), Math.cos(a) * r); lookGoal.set(0, .02, 0); }
+    camGoal.set(v.x + Math.sin(a) * 1.15 * zoom, v.y + .06 + userTilt * .3, v.z + Math.cos(a) * 1.15 * zoom); lookGoal.copy(v).add(new THREE.Vector3(.18, 0, 0)); }
+  else { camGoal.set(Math.sin(a) * r, .12 + .28 * Math.sin(orbitT * .05) + userTilt, Math.cos(a) * r); lookGoal.set(0, .02, 0); }
   cam.position.lerp(camGoal, .045); look.lerp(lookGoal, .06); cam.lookAt(look);
   composer.render();
   document.body.classList.toggle("dim", !!focus);
