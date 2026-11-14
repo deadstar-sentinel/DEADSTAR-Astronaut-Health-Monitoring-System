@@ -17,7 +17,17 @@
   #hud b{color:#5CE1E6}
   .tag{position:fixed;z-index:4;pointer-events:none;font-size:10.5px;letter-spacing:.12em;white-space:nowrap;
     padding:3px 7px;border-left:1px solid currentColor;background:rgba(5,8,13,.55);transform:translate(14px,-50%)}
-  #card{position:fixed;right:14px;top:14px;max-width:260px;padding:10px 12px;border:1px solid #1A2430;background:rgba(11,17,24,.92);display:none;z-index:5}
+  #card{position:fixed;right:18px;top:50%;width:300px;padding:14px 16px;border:1px solid #1A2430;border-left:2px solid var(--lv,#5CE1E6);
+    background:rgba(8,13,19,.9);backdrop-filter:blur(6px);z-index:5;transform:translate(24px,-50%);opacity:0;pointer-events:none;
+    transition:opacity .45s,transform .45s}
+  #card.on{opacity:1;transform:translate(0,-50%);pointer-events:auto}
+  #card .k{font-size:10px;letter-spacing:.12em;color:#56636F;text-transform:uppercase}
+  #card .row{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px solid #1A2430;font-size:11px}
+  #card .row span:last-child{color:#E6EDF3;text-align:right}
+  #card .big{font-size:30px;color:#E6EDF3;font-variant-numeric:tabular-nums;margin:2px 0}
+  #card .sig{font-size:11px;color:#8A99A8;line-height:1.6}
+  #card .act{margin-top:8px;padding:7px 8px;border:1px solid var(--lv);font-size:11px;line-height:1.45}
+  #card .foot{margin-top:8px;font-size:9.5px;color:#56636F;letter-spacing:.06em}
   .pyr #hud,.pyr #card,.pyr #title,.pyr .tag,.pyr .bar{display:none}
   .pyr{background:#000}
 </style>
@@ -52,7 +62,56 @@ addEventListener("keydown", e => {
 
 const CYAN = new THREE.Color("#5CE1E6");
 const LEVEL = { nom: ["#3DD68C", "NOMINAL ●"], cau: ["#F5B83D", "CAUTION ▲"], crit: ["#FF5D5D", "CRITICAL ■"] };
-const status = { lymph: "cau", eyes: "cau" };
+// ---------- what each body system forecasts ----------
+// SIMULATED values for the demo crew. When the engine is live, /api/twin/<crew>/<system> replaces them.
+// p = probability of crossing the clinical threshold within the horizon; band = 80 % interval on p.
+// ttt_h = forecast hours until the threshold is crossed (drives the light-cone decision).
+// chart: mu, sd (personal baseline), drift per step, thr (threshold), dir (+1 rises into risk, -1 falls)
+const TWIN = {
+  brain: { lv: "crit", name: "Fatigue before EVA", hrp: "Inadequate sleep and irregular schedules",
+    q: "P(alertness below EVA minimum at EVA start)", p: .71, band: [.58, .82], horizon: "next 2 h", ttt_h: .42,
+    lead: "Flagged 6.1 h before the EVA", sig: ["Sleep debt 3.4 h", "Reaction time +41 ms vs baseline", "Awake 17.6 h"],
+    act: "EVA NO-GO. Postpone 4 h, 30 min bright light, repeat reaction test.",
+    chart: { mu: 100, sd: 4, drift: -.35, thr: 82, dir: -1, unit: "% alertness" } },
+  lymph: { lv: "cau", name: "Latent virus reactivation", hrp: "Altered immune system responses",
+    q: "P(fever ≥ 38.0 °C within 24 h)", p: .62, band: [.48, .74], horizon: "24 h", ttt_h: 6.4,
+    lead: "Detected 9.2 h before any vital left its normal range", sig: ["Core temp +0.38 °C", "Heart rate +7.6 bpm", "HRV −18 %"],
+    act: "Fluids and rest, recheck temperature in 2 h. Antipyretic aboard (38 tablets).",
+    chart: { mu: 36.9, sd: .12, drift: .012, thr: 38.0, dir: 1, unit: "°C core" } },
+  eyes: { lv: "cau", name: "Optic disc swelling (SANS)", hrp: "Spaceflight Associated Neuro-ocular Syndrome",
+    q: "P(optic nerve sheath +0.5 mm by day 90)", p: .34, band: [.19, .52], horizon: "90 d", ttt_h: 984,
+    lead: "Trend visible since day 112", sig: ["ONSD +0.31 mm since launch", "Near vision −0.25 D"], prior: true,
+    act: "Thigh cuffs and weekly eye scan. Thigh Cuff is an ongoing NASA study: effect is a hypothesis under test.",
+    chart: { mu: 5.4, sd: .06, drift: .004, thr: 5.9, dir: 1, unit: "mm ONSD" } },
+  hip: { lv: "cau", name: "Hip bone loss", hrp: "Spaceflight-induced bone changes",
+    q: "P(hip BMD ≤ −10 % by mission end)", p: .58, band: [.41, .73], horizon: "mission end", ttt_h: 3120,
+    lead: "Loss rate −1.27 %/month (NASA prior 1–1.5 %)", sig: ["Exercise load 86 % of plan", "Bone markers rising"], prior: true,
+    act: "Resistance exercise to 100 % of plan. Discuss bisphosphonate with the flight surgeon.",
+    chart: { mu: 0, sd: .4, drift: -.09, thr: -10, dir: -1, unit: "% hip BMD" } },
+  heart: { lv: "nom", name: "Cardiovascular strain", hrp: "Cardiovascular adaptations",
+    q: "P(resting heart rate > +2σ within 72 h)", p: .07, band: [.03, .13], horizon: "72 h", ttt_h: null,
+    lead: "No pattern detected", sig: ["Resting HR 61 bpm (baseline 59)", "BP 118/76"], act: "Routine. Next check at 07:00.",
+    chart: { mu: 59, sd: 2.5, drift: .01, thr: 66.5, dir: 1, unit: "bpm resting" } },
+  lungs: { lv: "nom", name: "Low blood oxygen", hrp: "Hypoxia",
+    q: "P(SpO₂ ≤ 92 % within 24 h)", p: .03, band: [.01, .07], horizon: "24 h", ttt_h: null,
+    lead: "No pattern detected", sig: ["SpO₂ 97.4 %", "Cabin CO₂ 2.3 mmHg"], act: "Routine.",
+    chart: { mu: 97.5, sd: .5, drift: 0, thr: 92, dir: -1, unit: "% SpO₂" } },
+  spine: { lv: "nom", name: "Back pain", hrp: "Reduced cardiorespiratory and musculoskeletal fitness",
+    q: "P(back pain ≥ 4/10 within 7 d)", p: .12, band: [.06, .21], horizon: "7 d", ttt_h: null,
+    lead: "No pattern detected", sig: ["Pain 1/10 today"], act: "Routine stretching.",
+    chart: { mu: 1, sd: .6, drift: .004, thr: 4, dir: 1, unit: "pain /10" } },
+  gut: { lv: "nom", name: "Weight loss", hrp: "Inadequate food and nutrition",
+    q: "P(body mass −5 % by mission end)", p: .09, band: [.04, .17], horizon: "mission end", ttt_h: null,
+    lead: "No pattern detected", sig: ["Body mass −0.8 % since launch", "Intake 96 % of plan"], act: "Routine.", prior: true,
+    chart: { mu: 0, sd: .3, drift: -.006, thr: -5, dir: -1, unit: "% body mass" } },
+  leg: { lv: "nom", name: "Leg muscle loss", hrp: "Reduced cardiorespiratory and musculoskeletal fitness",
+    q: "P(leg strength −15 % by day 90)", p: .21, band: [.11, .34], horizon: "90 d", ttt_h: null,
+    lead: "No pattern detected", sig: ["Leg strength −3.9 % since launch"], act: "Keep exercise at plan.", prior: true,
+    chart: { mu: 0, sd: .8, drift: -.03, thr: -15, dir: -1, unit: "% leg strength" } },
+};
+const status = Object.fromEntries(Object.entries(TWIN).map(([k, v]) => [k, v.lv]));
+let oneWayS = 660;            // updated from /api/lightdelay; 11.0 min is today's computed value
+fetch("/api/lightdelay").then(r => r.json()).then(d => { if (d.one_way_s) oneWayS = d.one_way_s; }).catch(() => {});
 (q.get("status") || "").split(",").filter(Boolean).forEach(p => { const [k, v] = p.split(":"); status[k] = v; });
 const sys = n => n.replace(/^HS_/, "").replace(/_[LR]$/, "");
 
@@ -219,17 +278,64 @@ addEventListener("resize", resize); resize();
 
 // ---------- click a hotspot ----------
 const ray = new THREE.Raycaster(), card = document.getElementById("card");
+let focus = null, orbitT = 0;
+const camGoal = new THREE.Vector3(0, .12, 3.7), lookGoal = new THREE.Vector3(), look = new THREE.Vector3();
+cam.position.copy(camGoal);
 renderer.domElement.addEventListener("click", e => {
   ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), cam);
   const hit = ray.intersectObjects(spots, true)[0];      // halos make the targets easy to hit
-  if (!hit) { card.style.display = "none"; return; }
+  if (!hit) { focus = null; card.classList.remove("on"); return; }
   const obj = hit.object.userData.name ? hit.object : hit.object.parent;
-  const s = sys(obj.userData.name), lv = LEVEL[status[s] || "nom"];
-  card.innerHTML = `<div style="color:#8A99A8;letter-spacing:.12em">${s.toUpperCase()}</div>
-    <div style="color:${lv[0]};margin:4px 0 6px">${lv[1]}</div><div style="color:#8A99A8">Forecast for this system opens here.</div>`;
-  card.style.display = "block";
+  const s = sys(obj.userData.name);
+  focus = obj; showCard(s);
   dispatchEvent(new CustomEvent("sentinel:hotspot", { detail: s }));
 });
+addEventListener("keydown", e => { if (e.key === "Escape") { focus = null; card.classList.remove("on"); } });
+
+// Forecast chart: history solid, forecast dashed, 95 % band light, 80 % band darker, NOW rule, threshold dashed.
+function chartSVG(c, col) {
+  const W = 268, H = 86, nh = 48, nf = 24, hist = [], fc = [];
+  let x = c.mu, seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647 - .5;
+  for (let i = 0; i < nh; i++) { x += c.drift + rnd() * c.sd * .5; hist.push(x); }
+  for (let i = 1; i <= nf; i++) fc.push(x + c.drift * 1.6 * i);
+  const all = hist.concat(fc, [c.thr, c.mu - 2 * c.sd, c.mu + 2 * c.sd]);
+  const sdF = i => c.sd * (.8 + .22 * i);                       // band widens with horizon
+  const lo = Math.min(...all, ...fc.map((v, i) => v - 1.96 * sdF(i))), hi = Math.max(...all, ...fc.map((v, i) => v + 1.96 * sdF(i)));
+  const X = i => 4 + i / (nh + nf - 1) * (W - 8), Y = v => H - 6 - (v - lo) / (hi - lo || 1) * (H - 12);
+  const band = z => fc.map((v, i) => `${X(nh + i)},${Y(v + z * sdF(i))}`).concat(fc.map((v, i) => `${X(nh + i)},${Y(v - z * sdF(i))}`).reverse()).join(" ");
+  const line = (arr, o) => arr.map((v, i) => `${X(o + i)},${Y(v)}`).join(" ");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin:8px 0 4px">
+    <polygon points="${band(1.96)}" fill="${col}" opacity=".10"/><polygon points="${band(1.28)}" fill="${col}" opacity=".20"/>
+    <line x1="4" x2="${W - 4}" y1="${Y(c.thr)}" y2="${Y(c.thr)}" stroke="${col}" stroke-dasharray="4 3" opacity=".9"/>
+    <line x1="${X(nh - 1)}" x2="${X(nh - 1)}" y1="2" y2="${H - 2}" stroke="#56636F"/>
+    <text x="${X(nh - 1) + 3}" y="10" fill="#56636F" font-size="8" letter-spacing="1">NOW</text>
+    <text x="${W - 4}" y="${Y(c.thr) - 3}" fill="${col}" font-size="8" text-anchor="end">THRESHOLD ${c.thr} ${c.unit}</text>
+    <polyline points="${line(hist, 0)}" fill="none" stroke="#5CE1E6" stroke-width="1.4"/>
+    <polyline points="${line([hist[nh - 1], ...fc], nh - 1)}" fill="none" stroke="#5CE1E6" stroke-width="1.4" stroke-dasharray="3 3"/></svg>`;
+}
+
+function showCard(s) {
+  const d = TWIN[s]; if (!d) return;
+  const lv = LEVEL[d.lv], col = lv[0], earthMin = (2 * oneWayS + 600) / 60;
+  let light;
+  if (d.ttt_h == null) light = ["NO THRESHOLD CROSSING FORECAST", "Routine telemetry to Earth"];
+  else if (d.ttt_h * 60 < earthMin) light = [`THRESHOLD IN ${Math.round(d.ttt_h * 60)} MIN · EARTH REPLY ${earthMin.toFixed(0)} MIN`, "ACT ON BOARD NOW · CMO confirms · Earth informed"];
+  else light = [`THRESHOLD IN ${d.ttt_h >= 48 ? (d.ttt_h / 24).toFixed(0) + " D" : d.ttt_h.toFixed(1) + " H"} · EARTH REPLY ${earthMin.toFixed(0)} MIN`, "Time allows: consult flight surgeon · protocol prepared"];
+  card.style.setProperty("--lv", col);
+  card.innerHTML = `<div class="k">${s.toUpperCase()} · ${d.hrp}</div>
+    <div style="font-size:15px;margin:6px 0 2px;color:#E6EDF3">${d.name}</div>
+    <div style="color:${col};font-size:11px;letter-spacing:.1em">${lv[1]}</div>
+    <div class="big">${Math.round(d.p * 100)}<span style="font-size:14px;color:#8A99A8"> %</span></div>
+    <div class="sig">${d.q}<br>80 % interval ${Math.round(d.band[0] * 100)}–${Math.round(d.band[1] * 100)} % · horizon ${d.horizon}${d.prior ? " · prior-dominated" : ""}</div>
+    ${chartSVG(d.chart, col)}
+    <div class="row"><span class="k">Early warning</span><span>${d.lead}</span></div>
+    <div class="row"><span class="k">Signals</span><span>${d.sig.join("<br>")}</span></div>
+    <div class="row"><span class="k">Light cone</span><span>${light[0]}<br><b style="color:${col};font-weight:500">${light[1]}</b></span></div>
+    <div class="act">${d.act}</div>
+    <div class="foot">SIMULATED CREW · DEMO VALUES · DECISION SUPPORT, NOT DIAGNOSIS · ESC TO CLOSE</div>`;
+  card.classList.add("on");
+}
 window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) {
   m.material.color.set(LEVEL[l][0]); m.userData.halo.material.color.set(LEVEL[l][0]); } }); } };
 
@@ -255,10 +361,13 @@ renderer.setAnimationLoop(() => {
       ctx.drawImage(renderer.domElement, -w / 2, -w / 2, w, w); ctx.restore(); });
     return;
   }
-  // slow cinematic orbit: wide establishing arc, gentle crane up and down
-  const a = t * .11, r = 3.7 + .35 * Math.sin(t * .07);
-  cam.position.set(Math.sin(a) * r, .12 + .28 * Math.sin(t * .05), Math.cos(a) * r);
-  cam.lookAt(0, .02, 0);
+  // slow cinematic orbit; when a hotspot is tapped, glide in and hold on it
+  if (!focus) orbitT += 1 / 60;
+  const a = orbitT * .11, r = 3.7 + .35 * Math.sin(orbitT * .07);
+  if (focus) { focus.getWorldPosition(v);
+    camGoal.set(v.x + Math.sin(a) * 1.15, v.y + .06, v.z + Math.cos(a) * 1.15); lookGoal.copy(v).add(new THREE.Vector3(.18, 0, 0)); }
+  else { camGoal.set(Math.sin(a) * r, .12 + .28 * Math.sin(orbitT * .05), Math.cos(a) * r); lookGoal.set(0, .02, 0); }
+  cam.position.lerp(camGoal, .045); look.lerp(lookGoal, .06); cam.lookAt(look);
   composer.render();
   spots.forEach(m => { const tag = m.userData.tag; if (!tag) return;
     m.getWorldPosition(v); v.project(cam);
