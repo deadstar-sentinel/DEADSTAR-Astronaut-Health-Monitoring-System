@@ -28,6 +28,7 @@ export const SHAPES: ShapeId[] = ["body", "earth", "body", "body", "helix", "bod
 export const EARTH_X = -2.25;
 export const SHIP_X = 2.25;
 const MID_Y = 0.95;
+const GAIN: Record<ShapeId, number> = { body: 0.17, earth: 0.5, helix: 0.2 };
 
 interface Shape {
   pos: Float32Array;
@@ -164,7 +165,7 @@ const VERT = /* glsl */ `
   attribute vec3 aColTo;
   attribute vec4 aSeed;
   attribute float aKind;
-  uniform float uMix, uSwirl, uForm, uBurst, uTime, uPx, uOrgans, uAlert, uKindOn, uBright;
+  uniform float uMix, uSwirl, uForm, uBurst, uTime, uPx, uOrgans, uAlert, uKindOn, uBright, uGain;
   uniform vec3 uMouse;
   varying vec3 vCol;
   varying float vA;
@@ -191,14 +192,14 @@ const VERT = /* glsl */ `
 
     vec3 c = mix(aColFrom, aColTo, m);
     float inner = step(0.5, aKind);
-    c *= mix(1.0, mix(1.25 - 0.55 * uOrgans, 0.35 + 1.1 * uOrgans, inner), uKindOn);
+    c *= mix(1.0, mix(1.2 - 0.6 * uOrgans, 0.6 + 2.6 * uOrgans, inner), uKindOn);
     // scan sweep up the subject
     float sweep = exp(-pow((p.y - (mod(uTime * 0.45, 2.6) - 0.3)) * 9.0, 2.0));
     c += vec3(0.25, 0.6, 0.7) * sweep * 0.55 * uKindOn;
     // alert: red pressure waves from the chest
     float wave = 0.5 + 0.5 * sin(uTime * 5.0 - distance(p, vec3(0.0, 1.3, 0.05)) * 10.0);
     c = mix(c, vec3(1.0, 0.16, 0.22) * (0.55 + 0.9 * wave), uAlert * uKindOn * 0.85);
-    vCol = c * uBright * (0.75 + 0.5 * aSeed.w);
+    vCol = c * uBright * uGain * (0.75 + 0.5 * aSeed.w);
     vA = (0.35 + 0.65 * f) * (1.0 - uBurst);
 
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
@@ -284,6 +285,7 @@ export function ParticleStage({ rig, onReady }: { rig: StageRig; onReady: () => 
       uMix: { value: 0 }, uSwirl: { value: 0 }, uForm: { value: 0 }, uBurst: { value: 0 }, uTime: { value: 0 },
       uPx: { value: 1 }, uOrgans: { value: 0.5 }, uAlert: { value: 0 }, uKindOn: { value: 1 }, uBright: { value: 1 },
       uMouse: { value: new THREE.Vector3(99, 99, 99) },
+      uGain: { value: 0.17 },
     };
     const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
     const points = new THREE.Points(geo, mat);
@@ -346,7 +348,7 @@ export function ParticleStage({ rig, onReady }: { rig: StageRig; onReady: () => 
     // ---- glow
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.75, 0.0);
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.7, 0.12);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
 
@@ -452,6 +454,7 @@ export function ParticleStage({ rig, onReady }: { rig: StageRig; onReady: () => 
       uniforms.uMix.value = t;
       uniforms.uSwirl.value = from === to ? 0 : 1;
       uniforms.uKindOn.value = (from === "body" ? 1 - t : 0) + (to === "body" ? t : 0);
+      uniforms.uGain.value = GAIN[from] * (1 - t) + GAIN[to] * t; // additive layers: dense shapes need less per particle
       uniforms.uForm.value = rig.form;
       uniforms.uBurst.value = rig.burst;
       uniforms.uTime.value = time;

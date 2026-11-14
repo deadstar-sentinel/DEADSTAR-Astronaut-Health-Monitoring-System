@@ -71,7 +71,7 @@ function Scene({ i, side, children }: { i: number; side: "left" | "right" | "cen
   const align = side === "left" ? "lg:justify-start" : side === "right" ? "lg:justify-end" : "lg:justify-center";
   return (
     <section className={`sc sc-${i} absolute inset-0 flex items-end lg:items-center justify-center ${align} px-6 lg:px-[7vw] pb-20 lg:pb-0`} style={i > 0 ? { visibility: "hidden", opacity: 0 } : undefined}>
-      <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-0 p-4 lg:p-0`}>{children}</div>
+      <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : i === 0 ? "lg:max-w-[56vw]" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-0 p-4 lg:p-0`}>{children}</div>
     </section>
   );
 }
@@ -310,7 +310,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
               {/* 0 · HERO */}
               <Scene i={0} side="left">
                 <div className="hero-sub text-[11px] font-mono uppercase tracking-[0.4em] text-cyan-300/90 mb-4">NASA Space Apps 2026 · Team Deadstar</div>
-                <h1 className="flex overflow-hidden pb-2 text-[17vw] lg:text-[clamp(4.5rem,9.5vw,10rem)] font-semibold leading-[0.95] tracking-[0.06em] bg-gradient-to-b from-white via-cyan-100 to-cyan-400/70 bg-clip-text text-transparent">
+                <h1 className="flex overflow-hidden pb-2 whitespace-nowrap text-[15vw] lg:text-[clamp(4rem,8vw,9rem)] font-semibold leading-[0.95] tracking-[0.05em] bg-gradient-to-b from-white via-cyan-100 to-cyan-400/70 bg-clip-text text-transparent">
                   {title.split("").map((c, i) => (<span key={i} className="ch inline-block">{c}</span>))}
                 </h1>
                 <p className="hero-sub mt-5 text-xl sm:text-3xl text-white font-medium leading-snug">The flight surgeon that doesn't wait for Earth.</p>
