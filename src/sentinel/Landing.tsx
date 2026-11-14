@@ -174,19 +174,38 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       const owlt = live.current.owltMin;
       const clock = root.current?.querySelector(".dist-clock");
       const leg = root.current?.querySelector(".dist-leg");
-      const tl = gsap.timeline({ scrollTrigger: { trigger: ".s-dist", start: "top top", end: "+=220%", scrub: 0.6, pin: true } });
+      // The clock reads the timeline's own playhead, so number + label are exact at any scroll speed or direction.
+      const setClock = () => {
+        if (!clock || !leg) return;
+        const t = tl.time();
+        const Lb = tl.labels;
+        const frac = (a: number, b: number) => Math.min(1, Math.max(0, (t - a) / Math.max(1e-6, b - a)));
+        if (t < Lb.arrive) {
+          clock.textContent = (frac(Lb.go, Lb.arrive) * owlt).toFixed(1);
+          leg.textContent = "Crew → Earth";
+        } else if (t < Lb.back) {
+          clock.textContent = owlt.toFixed(1);
+          leg.textContent = "Reached Earth";
+        } else if (t < Lb.home) {
+          clock.textContent = (owlt + frac(Lb.back, Lb.home) * owlt).toFixed(1);
+          leg.textContent = "Earth → Crew";
+        } else {
+          clock.textContent = (2 * owlt).toFixed(1);
+          leg.textContent = "Round trip · before anyone replies";
+        }
+      };
+      const tl = gsap.timeline({ onUpdate: setClock, scrollTrigger: { trigger: ".s-dist", start: "top top", end: "+=220%", scrub: 0.6, pin: true } });
       tl.from(".s-dist .rv", { y: 30, opacity: 0, stagger: 0.08, duration: 0.25 })
-        .fromTo(".photon", { left: "0%" }, { left: "100%", duration: 1, ease: "none", onUpdate(this: gsap.core.Tween) {
-          if (clock) clock.textContent = (this.progress() * owlt).toFixed(1);
-          if (leg) leg.textContent = "Crew → Earth";
-        } })
-        .to(".dist-earth", { boxShadow: "0 0 60px 18px rgba(56,189,248,0.75)", duration: 0.1 })
-        .fromTo(".photon", { left: "100%" }, { left: "0%", duration: 1, ease: "none", immediateRender: false, onUpdate(this: gsap.core.Tween) {
-          if (clock) clock.textContent = (owlt + this.progress() * owlt).toFixed(1);
-          if (leg) leg.textContent = "Earth → Crew";
-        } })
-        .to(".dist-ship", { boxShadow: "0 0 60px 18px rgba(251,113,133,0.7)", duration: 0.1 })
+        .addLabel("go")
+        .fromTo(".photon", { left: "0%" }, { left: "100%", duration: 1, ease: "none" })
+        .addLabel("arrive")
+        .to(".dist-earth", { boxShadow: "0 0 60px 18px rgba(56,189,248,0.75)", duration: 0.15 })
+        .addLabel("back")
+        .fromTo(".photon", { left: "100%" }, { left: "0%", duration: 1, ease: "none", immediateRender: false })
+        .addLabel("home")
+        .to(".dist-ship", { boxShadow: "0 0 60px 18px rgba(251,113,133,0.7)", duration: 0.15 })
         .from(".dist-punch", { y: 20, opacity: 0, duration: 0.3 });
+      setClock();
 
       // 02 Decision: the problem's deadline vs Earth's answer — then the verdict slams in.
       const L = live.current;
