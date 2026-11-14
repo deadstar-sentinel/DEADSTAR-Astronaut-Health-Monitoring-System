@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SENTINEL — Hologram (Pepper's ghost)</title>
+<script type="importmap">{"imports":{"three":"/static/vendor/three.module.min.js","three/addons/":"/static/vendor/addons/"}}</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .help { position: fixed; left: 12px; bottom: 10px; color: #3a4a55; font: 11px/1.4 ui-monospace, monospace; cursor: default; }
+  .help b { color: #5ce1e6; font-weight: 500; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="help" id="help">Place a clear 4-sided pyramid (tip down) on the centre of the screen · dim the room · <b>F</b> fullscreen · <b>1–4</b> crew · <b>H</b> hide this text</div>
+<script type="module">
+import { createHologram } from "/static/js/hologram.js";
+const holo = createHologram(document.getElementById("c"), { quad: true, loadModel: true });
+const ids = ["vasquez", "mori", "haddad", "novak"];
+let idx = 1;
+async function load() {
+  try {
+    const meta = await (await fetch("/api/meta")).json();
+    const d = await (await fetch(`/api/crew/${ids[idx]}`)).json();
+    holo.setOrgans(d.organs); holo.setHeartRate(d.summary.vitals.hr);
+  } catch (e) {}
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "f" || e.key === "F") document.documentElement.requestFullscreen?.();
+  if (e.key === "h" || e.key === "H") document.getElementById("help").style.display = "none";
+  if ("1234".includes(e.key)) { idx = +e.key - 1; load(); }
+});
+document.addEventListener("click", () => document.documentElement.requestFullscreen?.());
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>
