@@ -1,4 +1,5 @@
 import type { AnatomyId } from "../data/anatomyCatalog.ts";
+import { Num } from "./Num.tsx";
 import { ORGAN_LINK, RISK_SIGNAL, anatomyForRisk, bandStyle, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
 
 /** History (solid), forecast mean (dashed), 80/95 % bands, NOW rule and threshold — straight from /api/forecast. */
@@ -50,14 +51,14 @@ function ForecastChart({ f: raw, decimals }: { f: Forecast; decimals: number }) 
 }
 
 export function ForecastCard({ organId }: { organId: AnatomyId }) {
-  const { crewId, mission, meta, earthReplyMin, focusRisk } = useSentinel();
+  const { crewId, mission, meta, earthReplyMin, focusRisk, missionId } = useSentinel();
   const base = ORGAN_LINK[organId];
   // An alert's "Show me" pins its exact risk (e.g. immune -> fever forecast) when it belongs to this structure.
   const pinned = focusRisk && meta && anatomyForRisk(focusRisk, meta.risks) === organId ? focusRisk : null;
   const organKey = pinned ? meta?.risks.find((r) => r.id === pinned)?.organ ?? base.organ : base.organ;
   const link = pinned && RISK_SIGNAL[pinned] ? { organ: organKey, ...RISK_SIGNAL[pinned] } : base;
-  const detail = useFetch<CrewDetail>(`/api/crew/${crewId}`);
-  const fc = useFetch<Forecast>(`/api/forecast/${crewId}/${link.signal}?horizon=${link.horizon}`);
+  const detail = useFetch<CrewDetail>(`/api/crew/${crewId}?mission=${missionId}`);
+  const fc = useFetch<Forecast>(`/api/forecast/${crewId}/${link.signal}?horizon=${link.horizon}&mission=${missionId}`);
   const crew = mission?.crew.find((c) => c.id === crewId);
   const organEntry = organKey ? detail?.organs[organKey] : undefined;
   const riskId = pinned ?? meta?.risks.find((r) => r.organ === organKey && r.name === organEntry?.risk)?.id;
@@ -81,7 +82,7 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
   const onBoard = actWithin != null && earthReplyMin != null && actWithin < earthReplyMin;
 
   return (
-    <div data-testid="forecast-card" className="border border-cyan-400/30 bg-[#051327]">
+    <div data-testid="forecast-card" key={`${crewId}:${link.signal}:${missionId}`} className="sx-rise border border-cyan-400/30 bg-[#051327] shadow-[0_0_30px_rgba(0,140,255,0.12)]">
       <div className="flex items-center justify-between px-3 pt-2.5">
         <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-300">
           SENTINEL forecast · {crew?.name ?? crewId}
@@ -94,9 +95,9 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
           <>
             <div className="flex items-baseline justify-between gap-2">
               <div className="text-sm text-white leading-snug">{organ.risk}</div>
-              <div className="text-xl font-semibold tabular-nums text-white">{Math.round(organ.score)}<span className="text-[10px] text-slate-400">/100</span></div>
+              <div className="text-xl font-semibold tabular-nums text-white"><Num value={Math.round(organ.score)} /><span className="text-[10px] text-slate-400">/100</span></div>
             </div>
-            <div className="h-1 bg-slate-800"><div className={`h-full ${st.dot}`} style={{ width: `${Math.min(100, organ.score)}%` }} /></div>
+            <div className="h-1 bg-slate-800"><div className={`sx-grow h-full ${st.dot}`} style={{ width: `${Math.min(100, organ.score)}%` }} /></div>
             <div className="text-[11px] text-slate-300">Driver: {organ.driver}</div>
           </>
         ) : (
@@ -110,7 +111,7 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
             <span>{sig?.label ?? link.signal}{sig?.unit ? ` (${sig.unit})` : ""}</span>
             <span>80 / 95 % bands</span>
           </div>
-          <ForecastChart f={fc} decimals={sig?.decimals ?? 1} />
+          <div className="sx-reveal"><ForecastChart f={fc} decimals={sig?.decimals ?? 1} /></div>
           {fc.threshold?.peak_prob != null && (
             <div className="px-1 text-[11px] text-slate-200">
               P({fc.threshold.label}) peaks at <b className="text-white">{Math.round(fc.threshold.peak_prob * 100)}%</b>
@@ -121,7 +122,7 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
       )}
 
       {actWithin != null && earthReplyMin != null && (
-        <div className={`mx-3 mt-2 p-2 border text-xs ${onBoard ? "border-rose-400/60 bg-rose-500/10" : "border-cyan-500/25 bg-[#040c18]"}`}>
+        <div className={`sx-rise mx-3 mt-2 p-2 border text-xs ${onBoard ? "border-rose-400/60 bg-rose-500/10" : "border-cyan-500/25 bg-[#040c18]"}`}>
           <div className="font-mono text-[10px] uppercase tracking-wider text-slate-300">
             Act within {actWithin < 120 ? `${Math.round(actWithin)} min` : `${(actWithin / 60).toFixed(0)} h`} · Earth reply {earthReplyMin.toFixed(1)} min
           </div>

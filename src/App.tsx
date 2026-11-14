@@ -71,6 +71,7 @@ export default function App() {
 
   const handleSelectOrgan = useCallback((id: AnatomyId | null, focusZoom = true) => {
     setState((prev) => selectOrgan(prev, id));
+    if (id) setRightOpen(true); // on narrow screens the inspector is a drawer: open it with the selection
     if (id && focusZoom) {
       viewportRef.current?.focusOnOrgan(id, false);
     } else if (!id) {
@@ -87,6 +88,7 @@ export default function App() {
         }
         return next;
       });
+      if (id) setRightOpen(true);
       if (id && focusZoom) {
         viewportRef.current?.focusOnSuitComponent(id, false);
       } else if (!id) {

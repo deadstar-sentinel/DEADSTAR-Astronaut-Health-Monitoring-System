@@ -26,7 +26,7 @@ export function ProtocolList({ protocols }: { protocols: ProposedProtocol[] }) {
       {protocols.map((p, pi) => {
         const st = bandStyle(p.severity);
         return (
-          <div key={p.id} className={`border ${p.onboard ? "border-rose-400/50 bg-rose-500/[0.06]" : "border-cyan-500/20 bg-[#040c18]"} p-2`}>
+          <div key={p.id} style={{ animationDelay: `${pi * 90}ms` }} className={`sx-rise border ${p.onboard ? "border-rose-400/50 bg-rose-500/[0.06]" : "border-cyan-500/20 bg-[#040c18]"} p-2`}>
             <div className="flex items-start justify-between gap-2">
               <div className="text-[12px] font-semibold text-white leading-snug">
                 <span className="text-slate-400 font-mono mr-1">{pi + 1}.</span>

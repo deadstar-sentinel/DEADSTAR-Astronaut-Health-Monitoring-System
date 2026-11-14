@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { ChevronDown, Play, Square } from "lucide-react";
+import { ParticleStage, type StageRig } from "./ParticleStage.tsx";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -25,7 +27,7 @@ function useStory(): Story | null {
   useEffect(() => {
     let alive = true;
     const timer = window.setTimeout(() => alive && setS((v) => v ?? FALLBACK), 2500);
-    Promise.all([fetch("/api/state").then((r) => r.json()), fetch("/api/meta").then((r) => r.json())])
+    Promise.all([fetch("/api/state?mission=mars_transit").then((r) => r.json()), fetch("/api/meta").then((r) => r.json())])
       .then(([st, meta]) => {
         if (!alive) return;
         const al = (st.alerts || []).find((a: { severity: string; act_within_min?: number }) => a.severity === "act" && a.act_within_min != null && a.act_within_min < 120);
@@ -45,7 +47,7 @@ function useStory(): Story | null {
         }));
       })
       .catch(() => alive && setS((v) => v ?? FALLBACK));
-    fetch("/api/validation")
+    fetch("/api/validation?mission=mars_transit")
       .then((r) => r.json())
       .then((val) => {
         const row = val?.summary?.find((r: { kind: string; h: number }) => r.kind === "hourly" && r.h === 24);
@@ -60,329 +62,385 @@ function useStory(): Story | null {
   return s;
 }
 
-/* ------------------------------------------------------------------ warp starfield: streaks with scroll speed */
-function Starfield({ scroller }: { scroller: RefObject<HTMLDivElement | null> }) {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
-    const cv = ref.current;
-    const sc = scroller.current;
-    if (!cv || !sc) return;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return;
-    const N = 520;
-    const stars = Array.from({ length: N }, () => ({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() }));
-    let w = 0;
-    let h = 0;
-    let raf = 0;
-    let last = sc.scrollTop;
-    let vel = 0;
-    const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = cv.clientWidth;
-      h = cv.clientHeight;
-      cv.width = w * dpr;
-      cv.height = h * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    };
-    resize();
-    window.addEventListener("resize", resize);
-    const frame = () => {
-      const d = sc.scrollTop - last;
-      last = sc.scrollTop;
-      vel += (Math.min(60, Math.abs(d)) - vel) * 0.12;
-      const speed = 0.0009 + vel * 0.0011;
-      ctx.clearRect(0, 0, w, h);
-      for (const s of stars) {
-        s.z -= speed;
-        if (s.z <= 0.02) {
-          s.x = Math.random() * 2 - 1;
-          s.y = Math.random() * 2 - 1;
-          s.z = 1;
-        }
-        const k = 0.55 / s.z;
-        const px = w / 2 + s.x * k * w * 0.5;
-        const py = h / 2 + s.y * k * h * 0.5;
-        if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue;
-        const a = Math.min(1, (1 - s.z) * 1.3);
-        const len = 1 + vel * 0.9 * (1 - s.z);
-        const dx = (px - w / 2) / Math.max(1, Math.hypot(px - w / 2, py - h / 2));
-        const dy = (py - h / 2) / Math.max(1, Math.hypot(px - w / 2, py - h / 2));
-        ctx.strokeStyle = `rgba(${170 + 60 * (1 - s.z)},${225},255,${a})`;
-        ctx.lineWidth = Math.max(0.6, (1 - s.z) * 1.8);
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(px - dx * len, py - dy * len);
-        ctx.stroke();
-      }
-      raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-    };
-  }, [scroller]);
-  return <canvas ref={ref} className="pointer-events-none fixed inset-0 w-full h-full" aria-hidden="true" />;
+const Kicker = ({ children }: { children: ReactNode }) => (
+  <div className="text-[11px] font-mono uppercase tracking-[0.32em] text-cyan-300/90">{children}</div>
+);
+
+/** A story beat laid over the 3D stage. `side` says where its text sits; the subject takes the other side. */
+function Scene({ i, side, children }: { i: number; side: "left" | "right" | "center"; children: ReactNode }) {
+  const align = side === "left" ? "lg:justify-start" : side === "right" ? "lg:justify-end" : "lg:justify-center";
+  return (
+    <section className={`sc sc-${i} absolute inset-0 flex items-end lg:items-center justify-center ${align} px-6 lg:px-[7vw] pb-20 lg:pb-0`} style={i > 0 ? { visibility: "hidden", opacity: 0 } : undefined}>
+      <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-0 p-4 lg:p-0`}>{children}</div>
+    </section>
+  );
 }
 
-const Kicker = ({ children }: { children: ReactNode }) => (
-  <div className="rv text-[11px] font-mono uppercase tracking-[0.32em] text-cyan-300/90">{children}</div>
-);
+const DUR = 5.6;                                   // master timeline length (one unit = one scene)
+const STOPS = [0, 1.36, 2.42, 3.42, 4.42, 5.4];     // where each scene rests
+const NAMES = ["Sentinel", "The distance", "The decision", "The twin", "The proof", "Enter"];
 
 /* ------------------------------------------------------------------ landing */
 export function Landing({ onEnter }: { onEnter: () => void }) {
   const root = useRef<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  const tlRef = useRef<gsap.core.Timeline | null>(null);
   const story = useStory();
   const s = story ?? FALLBACK;
   const live = useRef(s);
   live.current = s;
-  const ready = story !== null;
-  const title = "SENTINEL";
+  const [active, setActive] = useState(0);
+  const [film, setFilm] = useState(false);
+  const left = useRef(false);
+  const rig = useMemo<StageRig>(
+    () => ({ m: 0, form: 0, burst: 0, x: 0.9, rotY: -0.35, camZ: 4.7, organs: 0.55, alert: 0, photon: 0, photonA: 0, bright: 1, scrollV: 0 }),
+    [],
+  );
+  const max = Math.max(s.actMin, s.earthMin) * 1.08;
 
-  // Hero plays immediately on load — it never waits for data.
+  const leave = () => {
+    if (left.current) return;
+    left.current = true;
+    const sc = scroller.current;
+    if (sc) gsap.killTweensOf(sc);
+    gsap.to(rig, { burst: 1, bright: 2.2, duration: 0.85, ease: "power2.in" });
+    if (root.current) gsap.to(root.current, { opacity: 0, duration: 0.5, delay: 0.5, ease: "power1.in" });
+    window.setTimeout(onEnter, 1050); // timer, not an animation callback: entering can never stall
+  };
+
+  const goTo = (i: number, dur = 1.5) => {
+    const sc = scroller.current;
+    if (!sc) return;
+    const top = (STOPS[Math.max(0, Math.min(STOPS.length - 1, i))] / DUR) * (sc.scrollHeight - sc.clientHeight);
+    gsap.to(sc, { scrollTop: top, duration: dur, ease: "power2.inOut", overwrite: true });
+  };
+  const nearest = () => {
+    const t = tlRef.current?.time() ?? 0;
+    let best = 0;
+    STOPS.forEach((st, i) => {
+      if (Math.abs(st - t) < Math.abs(STOPS[best] - t)) best = i;
+    });
+    return best;
+  };
+
+  // Stardust gathers into the body as soon as the model is in.
+  const formed = useRef(false);
+  const onReady = () => {
+    if (formed.current) return;
+    formed.current = true;
+    gsap.to(rig, { form: 1, duration: 3.4, ease: "power2.inOut" });
+  };
+
   useLayoutEffect(() => {
     const sc = scroller.current;
     if (!sc || !root.current) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let feverDone = false;
+    let proofDone = false;
+    const q = (sel: string) => root.current?.querySelector<HTMLElement>(sel) ?? null;
+    const count = (sel: string, to: number, suffix = "") => {
+      const el = q(sel);
+      if (!el) return;
+      const o = { v: 0 };
+      gsap.to(o, { v: to, duration: 1.5, ease: "power2.out", onUpdate: () => { el.textContent = Math.round(o.v) + suffix; } });
+      window.setTimeout(() => { el.textContent = Math.round(to) + suffix; }, 1900);
+    };
     const ctx = gsap.context(() => {
-      gsap.from(".ch", { yPercent: 110, opacity: 0, filter: "blur(14px)", duration: 1.3, stagger: 0.06, ease: "expo.out", delay: 0.1 });
-      gsap.from(".hero-sub", { y: 24, opacity: 0, duration: 1.1, stagger: 0.12, delay: 0.6, ease: "power3.out" });
-      gsap.fromTo(".hero-bg", { scale: 1.18, opacity: 0 }, { scale: 1.02, opacity: 0.62, duration: 2.6, ease: "power2.out" });
-      gsap.to(".hero-inner", { yPercent: -35, opacity: 0, ease: "none", scrollTrigger: { scroller: sc, trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
-      gsap.to(".hero-bg", { yPercent: 18, ease: "none", scrollTrigger: { scroller: sc, trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
+      // hero entrance (plays on load; not tied to scroll)
+      if (!reduce) {
+        gsap.from(".ch", { yPercent: 115, opacity: 0, filter: "blur(16px)", duration: 1.4, stagger: 0.07, ease: "expo.out", delay: 0.25 });
+        gsap.from(".hero-sub", { y: 26, opacity: 0, duration: 1.1, stagger: 0.14, delay: 1.0, ease: "power3.out" });
+      }
+      gsap.to(".cta-ring", { scale: 1.6, opacity: 0, duration: 1.9, repeat: -1, ease: "power2.out" });
+      gsap.to(".hint-chev", { y: 7, duration: 0.9, repeat: -1, yoyo: true, ease: "sine.inOut" });
+
+      const clock = q(".dist-clock");
+      const leg = q(".dist-leg");
+      const prog = q(".prog");
+      const sync = () => {
+        const tl = tlRef.current;
+        if (!tl) return;
+        const t = tl.time();
+        const owlt = live.current.owltMin;
+        // the signal: ship -> Earth -> ship, clock in step with it
+        const f1 = gsap.utils.clamp(0, 1, (t - 1.14) / 0.2);
+        const f2 = gsap.utils.clamp(0, 1, (t - 1.4) / 0.2);
+        rig.photon = t < 1.4 ? f1 : 1 - f2;
+        rig.photonA = t > 1.08 && t < 1.7 ? 1 : 0;
+        if (clock && leg) {
+          clock.textContent = (owlt * (f1 + f2)).toFixed(1);
+          leg.textContent = f1 < 1 ? "Crew → Earth" : f2 <= 0 ? "Reached Earth" : f2 < 1 ? "Earth → Crew" : "Round trip · before anyone has replied";
+        }
+        if (prog) prog.style.transform = `scaleX(${tl.progress()})`;
+        if (t > 2.12 && !feverDone) {
+          feverDone = true;
+          count(".fever-n", live.current.feverPct, "%");
+        }
+        if (t > 4.08 && !proofDone) {
+          proofDone = true;
+          const v = live.current;
+          count(".n-risks", v.risks);
+          count(".n-sig", v.signals);
+          count(".n-cov", v.cover80, "%");
+          count(".n-src", v.sources);
+        }
+        let best = 0;
+        STOPS.forEach((st, i) => {
+          if (t >= st - 0.3) best = i;
+        });
+        setActive(best);
+      };
+
+      const tl = gsap.timeline({
+        defaults: { ease: "power2.out" },
+        onUpdate: sync,
+        scrollTrigger: { scroller: sc, start: 0, end: "max", scrub: 1.1 },
+      });
+      tlRef.current = tl;
+      const morph = (to: number, at: number, vars: gsap.TweenVars) => {
+        tl.to(rig, { m: to, duration: 0.38, ease: "power2.inOut" }, at);
+        tl.to(rig, { ...vars, duration: 0.38, ease: "power2.inOut" }, at);
+      };
+      const scene = (i: number) => {
+        if (i > 0) tl.fromTo(`.sc-${i}`, { autoAlpha: 0, y: 60 }, { autoAlpha: 1, y: 0, duration: 0.24 }, i - 0.14);
+        if (i < 5) tl.to(`.sc-${i}`, { autoAlpha: 0, y: -60, duration: 0.2, ease: "power2.in" }, i + 0.72);
+      };
+      // 0 hero -> 1 distance
+      scene(0);
+      tl.to(".hint", { autoAlpha: 0, duration: 0.1 }, 0.05);
+      morph(1, 0.7, { x: 0, rotY: 0, camZ: 7.4, organs: 0.5 });
+      scene(1);
+      tl.from(".sc-1 .rv", { y: 24, opacity: 0, stagger: 0.04, duration: 0.16 }, 0.92);
+      tl.fromTo(".dist-punch", { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.1 }, 1.6);
+      // 1 -> 2 decision
+      morph(2, 1.7, { x: -0.95, rotY: 0.4, camZ: 4.7, alert: 1 });
+      scene(2);
+      tl.from(".sc-2 .rv", { y: 24, opacity: 0, stagger: 0.04, duration: 0.16 }, 1.92);
+      tl.fromTo(".bar-act", { scaleX: 0 }, { scaleX: 1, duration: 0.2 }, 2.12);
+      tl.fromTo(".bar-earth", { scaleX: 0 }, { scaleX: 1, duration: 0.2 }, 2.18);
+      tl.fromTo(".verdict", { scale: 2.3, autoAlpha: 0, filter: "blur(12px)" }, { scale: 1, autoAlpha: 1, filter: "blur(0px)", duration: 0.12, ease: "back.out(2.2)" }, 2.42);
+      tl.fromTo(".verdict-note", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.1 }, 2.54);
+      // 2 -> 3 twin
+      morph(3, 2.7, { x: 0.95, rotY: -0.5, alert: 0, organs: 1.45, camZ: 4.3 });
+      scene(3);
+      tl.from(".sc-3 .rv", { y: 24, opacity: 0, stagger: 0.05, duration: 0.16 }, 2.92);
+      tl.from(".co", { x: -22, opacity: 0, stagger: 0.07, duration: 0.14 }, 3.14);
+      // 3 -> 4 proof
+      morph(4, 3.7, { x: -1.1, rotY: 0, organs: 0.6, camZ: 4.9 });
+      scene(4);
+      tl.from(".sc-4 .rv", { y: 24, opacity: 0, stagger: 0.05, duration: 0.16 }, 3.92);
+      tl.from(".stat", { y: 40, opacity: 0, rotateX: -20, stagger: 0.05, duration: 0.18 }, 4.0);
+      // 4 -> 5 enter
+      morph(5, 4.7, { x: 0, rotY: 0, camZ: 4.0, organs: 0.9, bright: 1.25 });
+      scene(5);
+      tl.from(".sc-5 .rv", { y: 24, opacity: 0, stagger: 0.06, duration: 0.18 }, 4.94);
+      tl.to({}, { duration: 0.01 }, DUR - 0.01);
+      sync();
     }, root);
-    return () => ctx.revert();
+
+    // scroll speed feeds the star warp; any manual input stops the film
+    let last = sc.scrollTop;
+    const onScroll = () => {
+      rig.scrollV = Math.max(rig.scrollV, Math.min(4, Math.abs(sc.scrollTop - last) / 30));
+      last = sc.scrollTop;
+    };
+    const stopFilm = () => {
+      gsap.killTweensOf(sc);
+      setFilm(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (["ArrowDown", "PageDown", " ", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+        setFilm(false);
+        const n = nearest();
+        if (n >= STOPS.length - 1) leave();
+        else goTo(n + 1);
+      } else if (["ArrowUp", "PageUp", "ArrowLeft"].includes(e.key)) {
+        e.preventDefault();
+        setFilm(false);
+        goTo(nearest() - 1);
+      } else if (e.key === "Enter" || e.key === "Escape") {
+        leave();
+      }
+    };
+    sc.addEventListener("scroll", onScroll, { passive: true });
+    sc.addEventListener("wheel", stopFilm, { passive: true });
+    sc.addEventListener("touchstart", stopFilm, { passive: true });
+    window.addEventListener("keydown", onKey);
+    (window as unknown as { __sentinel?: unknown }).__sentinel = { rig, tl: tlRef.current };
+    return () => {
+      sc.removeEventListener("scroll", onScroll);
+      sc.removeEventListener("wheel", stopFilm);
+      sc.removeEventListener("touchstart", stopFilm);
+      window.removeEventListener("keydown", onKey);
+      gsap.killTweensOf(sc);
+      gsap.killTweensOf(rig);
+      ctx.revert();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useLayoutEffect(() => {
-    if (!ready || !scroller.current || !root.current) return;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const toggleFilm = () => {
     const sc = scroller.current;
-    const ctx = gsap.context(() => {
-      ScrollTrigger.defaults({ scroller: sc });
-      const count = (sel: string, to: number, dec = 0, suffix = "") => {
-        const el = root.current?.querySelector(sel);
-        if (!el) return gsap.to({}, { duration: 0 });
-        const o = { v: 0 };
-        return gsap.to(o, { v: to, duration: 1.4, ease: "power2.out", onUpdate: () => { el.textContent = o.v.toFixed(dec) + suffix; } });
-      };
-      if (reduce) return;
-
-
-      // 01 Distance: a photon crosses to Earth and back; the clock runs with your scroll.
-      const owlt = live.current.owltMin;
-      const clock = root.current?.querySelector(".dist-clock");
-      const leg = root.current?.querySelector(".dist-leg");
-      // The clock reads the timeline's own playhead, so number + label are exact at any scroll speed or direction.
-      const setClock = () => {
-        if (!clock || !leg) return;
-        const t = tl.time();
-        const Lb = tl.labels;
-        const frac = (a: number, b: number) => Math.min(1, Math.max(0, (t - a) / Math.max(1e-6, b - a)));
-        if (t < Lb.arrive) {
-          clock.textContent = (frac(Lb.go, Lb.arrive) * owlt).toFixed(1);
-          leg.textContent = "Crew → Earth";
-        } else if (t < Lb.back) {
-          clock.textContent = owlt.toFixed(1);
-          leg.textContent = "Reached Earth";
-        } else if (t < Lb.home) {
-          clock.textContent = (owlt + frac(Lb.back, Lb.home) * owlt).toFixed(1);
-          leg.textContent = "Earth → Crew";
-        } else {
-          clock.textContent = (2 * owlt).toFixed(1);
-          leg.textContent = "Round trip · before anyone replies";
-        }
-      };
-      const tl = gsap.timeline({ onUpdate: setClock, scrollTrigger: { trigger: ".s-dist", start: "top top", end: "+=220%", scrub: 0.6, pin: true } });
-      tl.from(".s-dist .rv", { y: 30, opacity: 0, stagger: 0.08, duration: 0.25 })
-        .addLabel("go")
-        .fromTo(".photon", { left: "0%" }, { left: "100%", duration: 1, ease: "none" })
-        .addLabel("arrive")
-        .to(".dist-earth", { boxShadow: "0 0 60px 18px rgba(56,189,248,0.75)", duration: 0.15 })
-        .addLabel("back")
-        .fromTo(".photon", { left: "100%" }, { left: "0%", duration: 1, ease: "none", immediateRender: false })
-        .addLabel("home")
-        .to(".dist-ship", { boxShadow: "0 0 60px 18px rgba(251,113,133,0.7)", duration: 0.15 })
-        .from(".dist-punch", { y: 20, opacity: 0, duration: 0.3 });
-      setClock();
-
-      // 02 Decision: the problem's deadline vs Earth's answer — then the verdict slams in.
-      const L = live.current;
-      const max = Math.max(L.actMin, L.earthMin) * 1.08;
-      const tl2 = gsap.timeline({ scrollTrigger: { trigger: ".s-dec", start: "top top", end: "+=170%", scrub: 0.6, pin: true } });
-      tl2.from(".s-dec .rv", { y: 30, opacity: 0, stagger: 0.08, duration: 0.25 })
-        .fromTo(".bar-act", { scaleX: 0 }, { scaleX: L.actMin / max, duration: 0.6, ease: "power2.out" })
-        .fromTo(".bar-earth", { scaleX: 0 }, { scaleX: L.earthMin / max, duration: 0.6, ease: "power2.out" }, "<0.15")
-        .fromTo(".verdict", { scale: 2.4, opacity: 0, filter: "blur(10px)" }, { scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.35, ease: "back.out(2)" })
-        .from(".verdict-note", { y: 16, opacity: 0, duration: 0.25 });
-      ScrollTrigger.create({ trigger: ".s-dec", start: "top 30%", once: true, onEnter: () => { count(".fever-n", live.current.feverPct, 0, "%"); } });
-
-      // 03 Twin: parallax render, anatomy callouts draw themselves in.
-      gsap.fromTo(".twin-img", { yPercent: 12, scale: 1.12 }, { yPercent: -8, scale: 1, ease: "none", scrollTrigger: { trigger: ".s-twin", start: "top bottom", end: "bottom top", scrub: true } });
-      gsap.from(".s-twin .rv", { y: 40, opacity: 0, stagger: 0.12, duration: 1, ease: "power3.out", scrollTrigger: { trigger: ".s-twin", start: "top 65%" } });
-      gsap.utils.toArray<SVGPathElement>(".callout-path").forEach((p, i) => {
-        const L = p.getTotalLength();
-        gsap.fromTo(p, { strokeDasharray: L, strokeDashoffset: L }, { strokeDashoffset: 0, duration: 1.1, delay: 0.25 + i * 0.18, ease: "power2.inOut", scrollTrigger: { trigger: ".s-twin", start: "top 55%" } });
-      });
-      gsap.from(".callout-tag", { opacity: 0, x: 12, stagger: 0.18, delay: 0.9, duration: 0.6, scrollTrigger: { trigger: ".s-twin", start: "top 55%" } });
-
-      // 04 Proof: cards rise, numbers count up once.
-      gsap.from(".stat", { y: 50, opacity: 0, rotateX: -18, stagger: 0.12, duration: 1, ease: "power3.out", scrollTrigger: { trigger: ".s-proof", start: "top 70%" } });
-      ScrollTrigger.create({ trigger: ".s-proof", start: "top 65%", once: true, onEnter: () => {
-        const v = live.current;
-        count(".n-risks", v.risks); count(".n-sig", v.signals); count(".n-cov", v.cover80, 0, "%"); count(".n-src", v.sources);
-      } });
-
-      // CTA
-      gsap.from(".s-cta .rv", { y: 30, opacity: 0, stagger: 0.12, duration: 1, ease: "power3.out", scrollTrigger: { trigger: ".s-cta", start: "top 70%" } });
-      gsap.to(".cta-ring", { scale: 1.5, opacity: 0, duration: 1.8, repeat: -1, ease: "power2.out" });
-    }, root);
-    return () => {
-      ctx.revert();
-      ScrollTrigger.defaults({ scroller: window });
-    };
-  }, [ready]);
-
-  const enter = () => {
-    if (!root.current) return onEnter();
-    gsap.to(root.current, { opacity: 0, scale: 1.08, filter: "blur(10px)", duration: 0.75, ease: "power2.in", onComplete: onEnter });
+    if (!sc) return;
+    if (film) {
+      gsap.killTweensOf(sc);
+      setFilm(false);
+      return;
+    }
+    const end = sc.scrollHeight - sc.clientHeight;
+    const remaining = Math.max(0.05, 1 - sc.scrollTop / end);
+    setFilm(true);
+    gsap.to(sc, { scrollTop: end, duration: 46 * remaining, ease: "none", overwrite: true, onComplete: () => setFilm(false) });
   };
+
+  const title = "SENTINEL";
+  const ui = "pointer-events-auto border border-white/25 bg-black/40 backdrop-blur text-[11px] font-mono uppercase tracking-[0.2em] text-slate-200 hover:border-cyan-300 hover:text-white";
 
   return (
     <div ref={root} className="fixed inset-0 bg-[#02060f] text-white">
-      <div ref={scroller} className="absolute inset-0 overflow-y-auto overflow-x-hidden med-scroll">
-        <Starfield scroller={scroller} />
-        <button type="button" onClick={enter} className="fixed top-4 right-4 z-50 px-3 py-1.5 border border-white/25 bg-black/40 backdrop-blur text-[11px] font-mono uppercase tracking-[0.2em] text-slate-200 hover:border-cyan-300 hover:text-white">
-          Skip intro ›
-        </button>
+      <div ref={scroller} className="absolute inset-0 overflow-y-auto overflow-x-hidden [scrollbar-width:none]">
+        <div style={{ height: `${(DUR + 1) * 100}vh` }}>
+          <div className="sticky top-0 h-screen w-full overflow-hidden">
+            <img src="/media/twin_render_1.jpg" alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" />
+            <ParticleStage rig={rig} onReady={onReady} />
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(2,6,15,0.7)_100%)]" />
 
-        {/* HERO */}
-        <section className="s-hero relative h-screen flex items-center justify-center overflow-hidden">
-          <img src="/media/twin_render_1.jpg" alt="" className="hero-bg absolute inset-0 w-full h-full object-cover opacity-60" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(2,6,15,0.15)_0%,rgba(2,6,15,0.85)_70%,#02060f_100%)]" />
-          <div className="hero-inner relative text-center px-6">
-            <div className="hero-sub text-[11px] font-mono uppercase tracking-[0.4em] text-cyan-300/90 mb-5">NASA Space Apps 2026 · Team Deadstar</div>
-            <h1 className="flex justify-center overflow-hidden text-[18vw] sm:text-[12vw] lg:text-[10rem] font-semibold leading-none tracking-[0.08em] bg-gradient-to-b from-white via-cyan-100 to-cyan-400/70 bg-clip-text text-transparent">
-              {title.split("").map((c, i) => (<span key={i} className="ch inline-block">{c}</span>))}
-            </h1>
-            <p className="hero-sub mt-6 text-xl sm:text-2xl text-slate-100">The flight surgeon that doesn't wait for Earth.</p>
-            <p className="hero-sub mt-2 text-sm sm:text-base text-slate-400 max-w-xl mx-auto">An autonomous medical officer and digital twin for crews beyond the reach of real-time help.</p>
-            <div className="hero-sub mt-8 inline-flex items-center gap-2 px-3 py-1.5 border border-cyan-400/30 bg-cyan-400/5 text-[12px] font-mono text-cyan-100">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> LIVE · crew → Earth light time today: {s.owltMin.toFixed(1)} min
-            </div>
-          </div>
-          <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-[10px] font-mono tracking-[0.3em] text-slate-400">
-            SCROLL
-            <span className="block w-px h-10 bg-gradient-to-b from-cyan-300 to-transparent animate-pulse" />
-          </div>
-        </section>
-
-        {/* 01 DISTANCE */}
-        <section className="s-dist relative h-screen flex items-center justify-center px-6">
-          <div className="w-full max-w-5xl">
-            <Kicker>01 · The distance</Kicker>
-            <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Help is a <span className="text-cyan-300">light-speed</span> round trip away.</h2>
-            <div className="rv mt-12 flex items-end gap-4">
-              <div className="text-[18vw] sm:text-[9rem] font-semibold tabular-nums leading-none"><span className="dist-clock">0.0</span></div>
-              <div className="pb-4 text-xl text-slate-300">min<div className="dist-leg text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-300">Crew → Earth</div></div>
-            </div>
-            <div className="rv relative mt-10 h-14">
-              <div className="absolute top-1/2 left-0 right-0 h-px bg-gradient-to-r from-sky-400/70 via-white/30 to-rose-400/70" />
-              <div className="dist-earth absolute top-1/2 left-0 -translate-y-1/2 w-5 h-5 rounded-full bg-sky-400" />
-              <div className="dist-ship absolute top-1/2 right-0 -translate-y-1/2 w-5 h-5 rounded-full bg-rose-400" />
-              <div className="photon absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-[0_0_24px_8px_rgba(165,243,252,0.9)]" />
-              <div className="absolute -bottom-6 left-0 text-[11px] font-mono uppercase tracking-[0.2em] text-sky-300">Earth · flight surgeon</div>
-              <div className="absolute -bottom-6 right-0 text-[11px] font-mono uppercase tracking-[0.2em] text-rose-300 text-right">Crew · Mars transit day {s.day}/{s.duration}</div>
-            </div>
-            <p className="dist-punch mt-16 text-lg sm:text-2xl text-slate-200 max-w-3xl">
-              {(2 * s.owltMin).toFixed(1)} minutes just for the signal — before anyone on Earth has read it. Near conjunction, over 40.
-            </p>
-          </div>
-        </section>
-
-        {/* 02 DECISION */}
-        <section className="s-dec relative h-screen flex items-center justify-center px-6">
-          <div className="w-full max-w-5xl">
-            <Kicker>02 · The decision</Kicker>
-            <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">A fever won't wait for the answer.</h2>
-            <p className="rv mt-3 text-slate-300">{s.crewName}: temperature, heart rate and HRV drifting together. P(fever ≥ 38 °C within 24 h): <b className="fever-n text-white tabular-nums">0%</b></p>
-            <div className="rv mt-10 space-y-5">
-              <div>
-                <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-rose-200"><span>Problem arrives — act within</span><span>{s.actMin} min</span></div>
-                <div className="mt-1.5 h-4 bg-white/5"><div className="bar-act h-full origin-left bg-gradient-to-r from-rose-500 to-rose-300 shadow-[0_0_24px_rgba(251,113,133,0.5)]" /></div>
-              </div>
-              <div>
-                <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-sky-200"><span>Earth's answer arrives</span><span>{s.earthMin.toFixed(1)} min</span></div>
-                <div className="mt-1.5 h-4 bg-white/5"><div className="bar-earth h-full origin-left bg-gradient-to-r from-sky-500 to-sky-300 shadow-[0_0_24px_rgba(56,189,248,0.5)]" /></div>
-              </div>
-            </div>
-            <div className="verdict mt-12 inline-block px-6 py-3 border-2 border-rose-300 text-2xl sm:text-4xl font-semibold tracking-[0.12em] text-rose-100 shadow-[0_0_60px_rgba(251,113,133,0.45)] bg-rose-500/10">
-              SENTINEL ACTS ON BOARD
-            </div>
-            <p className="verdict-note mt-4 text-slate-300 max-w-2xl">The onboard infection protocol starts now. Earth receives a compressed report and can overrule — but the crew never waits on physics.</p>
-          </div>
-        </section>
-
-        {/* 03 TWIN */}
-        <section className="s-twin relative min-h-screen flex items-center px-6 py-24 overflow-hidden">
-          <div className="w-full max-w-6xl mx-auto grid lg:grid-cols-2 gap-10 items-center">
-            <div>
-              <Kicker>03 · The twin</Kicker>
-              <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Every crew member, mirrored.</h2>
-              <p className="rv mt-5 text-slate-300 text-lg">A realistic body designed in Blender and rendered as a living hologram. Each organ is tied to one of NASA's {s.risks} Human Research Program risks and to signals forecast hour by hour, with honest uncertainty bands.</p>
-              <p className="rv mt-3 text-slate-400">Tap an organ: see its risk, its forecast, and whether to act now or ask Earth.</p>
-            </div>
-            <div className="relative aspect-[16/10] overflow-hidden border border-cyan-400/20">
-              <img src="/media/twin_render_2.jpg" alt="Ray-traced render of the SENTINEL hologram twin" className="twin-img absolute inset-0 w-full h-full object-cover" />
-              <svg className="absolute inset-0 w-full h-full" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">
-                <path className="callout-path" d="M80 16 L100 12 L128 12" stroke="#a5f3fc" strokeWidth="0.35" fill="none" />
-                <path className="callout-path" d="M82 34 L104 30 L128 30" stroke="#a5f3fc" strokeWidth="0.35" fill="none" />
-                <path className="callout-path" d="M78 47 L56 44 L30 44" stroke="#fda4af" strokeWidth="0.35" fill="none" />
-              </svg>
-              <div className="callout-tag absolute right-[4%] top-[8%] text-[11px] font-mono text-cyan-100 bg-black/50 px-1.5">BRAIN · sleep 4.9 h</div>
-              <div className="callout-tag absolute right-[4%] top-[26%] text-[11px] font-mono text-cyan-100 bg-black/50 px-1.5">HEART · HR forecast</div>
-              <div className="callout-tag absolute left-[4%] top-[40%] text-[11px] font-mono text-rose-100 bg-black/50 px-1.5">IMMUNE · fever risk</div>
-            </div>
-          </div>
-        </section>
-
-        {/* 04 PROOF */}
-        <section className="s-proof relative min-h-screen flex items-center px-6 py-24 [perspective:1000px]">
-          <div className="w-full max-w-6xl mx-auto">
-            <Kicker>04 · The proof</Kicker>
-            <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Built on NASA science. Graded on its own record.</h2>
-            <div className="mt-12 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                ["n-risks", "NASA HRP risks modelled", "Human Research Program"],
-                ["n-sig", "physiological signals forecast", "hourly and daily, 80/95 % bands"],
-                ["n-cov", "of outcomes inside the 80 % band", "back-tested, 24-hour horizon"],
-                ["n-src", "NASA & JPL sources cited", "every constant links to its source"],
-              ].map(([cls, label, note]) => (
-                <div key={cls} className="stat p-5 border border-cyan-400/20 bg-gradient-to-b from-cyan-400/[0.07] to-transparent">
-                  <div className={`${cls} text-5xl font-semibold tabular-nums text-white`}>0</div>
-                  <div className="mt-2 text-sm text-slate-200">{label}</div>
-                  <div className="mt-1 text-[11px] font-mono text-slate-500">{note}</div>
+            <div className="pointer-events-none absolute inset-0">
+              {/* 0 · HERO */}
+              <Scene i={0} side="left">
+                <div className="hero-sub text-[11px] font-mono uppercase tracking-[0.4em] text-cyan-300/90 mb-4">NASA Space Apps 2026 · Team Deadstar</div>
+                <h1 className="flex overflow-hidden pb-2 text-[17vw] lg:text-[clamp(4.5rem,9.5vw,10rem)] font-semibold leading-[0.95] tracking-[0.06em] bg-gradient-to-b from-white via-cyan-100 to-cyan-400/70 bg-clip-text text-transparent">
+                  {title.split("").map((c, i) => (<span key={i} className="ch inline-block">{c}</span>))}
+                </h1>
+                <p className="hero-sub mt-5 text-xl sm:text-3xl text-white font-medium leading-snug">The flight surgeon that doesn't wait for Earth.</p>
+                <p className="hero-sub mt-3 text-sm sm:text-base text-slate-300 max-w-md">An autonomous medical officer and living digital twin for crews beyond the reach of real-time help. Move your cursor through the hologram: it is live.</p>
+                <div className="hero-sub mt-7 flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 border border-cyan-400/30 bg-cyan-400/5 text-[12px] font-mono text-cyan-100">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> LIVE · crew → Earth light time now: {s.owltMin.toFixed(1)} min
+                  </span>
+                  <button type="button" onClick={() => goTo(1)} className={`${ui} px-3 py-1.5 !tracking-[0.16em]`}>Begin ↓</button>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
+              </Scene>
 
-        {/* CTA */}
-        <section className="s-cta relative h-screen flex items-center justify-center px-6 text-center">
-          <div>
-            <h2 className="rv text-3xl sm:text-6xl font-semibold leading-tight">Meet the crew.</h2>
-            <p className="rv mt-4 text-slate-300">Four synthetic astronauts. Day {s.day} of a {s.duration}-day Mars transit. One of them needs you now.</p>
-            <div className="rv relative inline-block mt-10">
-              <span className="cta-ring absolute inset-0 border border-cyan-300 pointer-events-none" />
-              <button type="button" onClick={enter} className="relative px-10 py-4 bg-cyan-300 text-[#02060f] text-sm font-semibold uppercase tracking-[0.25em] hover:bg-white transition-colors shadow-[0_0_50px_rgba(103,232,249,0.55)]">
-                Enter mission control
-              </button>
+              {/* 1 · DISTANCE */}
+              <section className="sc sc-1 absolute inset-0 flex flex-col items-center justify-between py-[9vh] px-6 text-center" style={{ visibility: "hidden", opacity: 0 }}>
+                <div>
+                  <div className="rv"><Kicker>01 · The distance</Kicker></div>
+                  <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Help is a <span className="text-cyan-300">light-speed</span> round trip away.</h2>
+                </div>
+                <div className="w-full max-w-6xl flex justify-between text-[11px] font-mono uppercase tracking-[0.2em] translate-y-[17vh]">
+                  <span className="rv text-sky-300 text-left">Earth<br /><span className="text-slate-400">flight surgeon</span></span>
+                  <span className="rv text-rose-300 text-right">Crew<br /><span className="text-slate-400">Mars transit · day {s.day}/{s.duration}</span></span>
+                </div>
+                <div>
+                  <div className="rv flex items-end justify-center gap-3">
+                    <span className="dist-clock text-[20vw] sm:text-[8.5rem] font-semibold tabular-nums leading-none">0.0</span>
+                    <span className="pb-3 text-xl text-slate-300 text-left">min<span className="dist-leg block text-[11px] font-mono uppercase tracking-[0.2em] text-cyan-300">Crew → Earth</span></span>
+                  </div>
+                  <p className="dist-punch mt-4 text-base sm:text-xl text-slate-200 max-w-2xl mx-auto">
+                    {(2 * s.owltMin).toFixed(1)} minutes for the signal alone. Near solar conjunction it is over 40, and sometimes there is no link at all.
+                  </p>
+                </div>
+              </section>
+
+              {/* 2 · DECISION */}
+              <Scene i={2} side="right">
+                <div className="rv"><Kicker>02 · The decision</Kicker></div>
+                <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">A fever won't wait for the answer.</h2>
+                <p className="rv mt-3 text-slate-300">{s.crewName}: temperature, heart rate and HRV are drifting together. Chance of fever ≥ 38 °C within 24 h: <b className="fever-n text-white tabular-nums">0%</b></p>
+                <div className="rv mt-8 space-y-5">
+                  <div>
+                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-rose-200"><span>Act within</span><span>{s.actMin} min</span></div>
+                    <div className="mt-1.5 h-4 bg-white/5"><div className="bar-act h-full origin-left bg-gradient-to-r from-rose-500 to-rose-300 shadow-[0_0_24px_rgba(251,113,133,0.5)]" style={{ width: `${(s.actMin / max) * 100}%` }} /></div>
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-sky-200"><span>Earth's answer arrives</span><span>{s.earthMin.toFixed(1)} min</span></div>
+                    <div className="mt-1.5 h-4 bg-white/5"><div className="bar-earth h-full origin-left bg-gradient-to-r from-sky-500 to-sky-300 shadow-[0_0_24px_rgba(56,189,248,0.5)]" style={{ width: `${(s.earthMin / max) * 100}%` }} /></div>
+                  </div>
+                </div>
+                <div className="verdict mt-9 inline-block px-5 py-3 border-2 border-rose-300 text-xl sm:text-3xl font-semibold tracking-[0.12em] text-rose-100 shadow-[0_0_60px_rgba(251,113,133,0.45)] bg-rose-500/10">
+                  SENTINEL ACTS ON BOARD
+                </div>
+                <p className="verdict-note mt-4 text-slate-300">The onboard infection protocol starts now. Earth gets a compressed report and can overrule, but the crew never waits on physics.</p>
+              </Scene>
+
+              {/* 3 · TWIN */}
+              <Scene i={3} side="left">
+                <div className="rv"><Kicker>03 · The twin</Kicker></div>
+                <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Every crew member, mirrored.</h2>
+                <p className="rv mt-4 text-slate-300 text-lg">A realistic body built in Blender, alive as a hologram. Each organ is tied to one of NASA's {s.risks} Human Research Program risks and to signals forecast hour by hour, with honest uncertainty bands.</p>
+                <div className="mt-6 space-y-2">
+                  {[
+                    ["Brain", "sleep, cognition, reaction time", "text-pink-200 border-pink-300/40"],
+                    ["Heart & blood", "heart rate, plasma volume, pressure", "text-rose-200 border-rose-300/40"],
+                    ["Immune", "fever risk from temperature, HR and HRV together", "text-amber-200 border-amber-300/40"],
+                    ["Bone & muscle", "hip density and leg strength against NASA limits", "text-sky-200 border-sky-300/40"],
+                  ].map(([k, v, cls]) => (
+                    <div key={k} className={`co flex items-baseline gap-3 border-l-2 pl-3 ${cls}`}>
+                      <span className="text-[12px] font-mono uppercase tracking-[0.18em] w-32 shrink-0">{k}</span>
+                      <span className="text-sm text-slate-300">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </Scene>
+
+              {/* 4 · PROOF */}
+              <Scene i={4} side="right">
+                <div className="rv"><Kicker>04 · The proof</Kicker></div>
+                <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Built on NASA science. Graded on its own record.</h2>
+                <div className="mt-8 grid grid-cols-2 gap-3 [perspective:900px]">
+                  {[
+                    ["n-risks", "NASA HRP risks modelled", "Human Research Program"],
+                    ["n-sig", "signals forecast", "hourly and daily, 80/95 % bands"],
+                    ["n-cov", "of outcomes inside the 80 % band", "back-tested, 24 h ahead"],
+                    ["n-src", "NASA, NOAA & JPL sources", "every constant links to its source"],
+                  ].map(([cls, label, note]) => (
+                    <div key={cls} className="stat p-4 border border-cyan-400/25 bg-[#02060f]/70 backdrop-blur-sm">
+                      <div className={`${cls} text-4xl sm:text-5xl font-semibold tabular-nums text-white`}>0</div>
+                      <div className="mt-1.5 text-sm text-slate-200">{label}</div>
+                      <div className="mt-1 text-[11px] font-mono text-slate-500">{note}</div>
+                    </div>
+                  ))}
+                </div>
+              </Scene>
+
+              {/* 5 · ENTER */}
+              <section className="sc sc-5 absolute inset-0 flex flex-col items-center justify-end pb-[12vh] px-6 text-center" style={{ visibility: "hidden", opacity: 0 }}>
+                <h2 className="rv text-4xl sm:text-6xl font-semibold leading-tight">Meet the crew.</h2>
+                <p className="rv mt-3 text-slate-200 max-w-xl">Four synthetic astronauts. Day {s.day} of a {s.duration}-day Mars transit. One of them needs you now.</p>
+                <div className="rv relative inline-block mt-8">
+                  <span className="cta-ring absolute inset-0 border border-cyan-300 pointer-events-none" />
+                  <button type="button" onClick={leave} className="pointer-events-auto relative px-10 py-4 bg-cyan-300 text-[#02060f] text-sm font-semibold uppercase tracking-[0.25em] hover:bg-white shadow-[0_0_50px_rgba(103,232,249,0.55)]">
+                    Enter mission control
+                  </button>
+                </div>
+                <p className="rv mt-6 text-[10px] font-mono tracking-[0.25em] text-slate-400">SYNTHETIC CREW · DECISION SUPPORT, NOT DIAGNOSIS</p>
+              </section>
             </div>
-            <p className="rv mt-8 text-[10px] font-mono tracking-[0.25em] text-slate-500">SYNTHETIC CREW · DECISION SUPPORT, NOT DIAGNOSIS</p>
+
+            {/* chrome: progress, scene dots, film, skip */}
+            <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/5"><div className="prog h-full origin-left bg-gradient-to-r from-cyan-400 to-white" style={{ transform: "scaleX(0)" }} /></div>
+            <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+              <button type="button" onClick={toggleFilm} className={`${ui} px-3 py-1.5 flex items-center gap-1.5`} title="Play the whole story hands-free">
+                {film ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}{film ? "Stop" : "Play film"}
+              </button>
+              <button type="button" onClick={leave} className={`${ui} px-3 py-1.5`}>Skip ›</button>
+            </div>
+            <nav className="absolute right-4 top-1/2 -translate-y-1/2 z-10 hidden sm:flex flex-col gap-3" aria-label="Story scenes">
+              {NAMES.map((n, i) => (
+                <button key={n} type="button" onClick={() => { setFilm(false); goTo(i); }} title={n} aria-label={n} aria-current={active === i} className="pointer-events-auto group flex items-center justify-end gap-2">
+                  <span className={`text-[10px] font-mono uppercase tracking-[0.18em] transition-opacity ${active === i ? "opacity-100 text-white" : "opacity-0 group-hover:opacity-100 text-slate-300"}`}>{n}</span>
+                  <span className={`block rounded-full transition-all ${active === i ? "w-2.5 h-2.5 bg-cyan-300 shadow-[0_0_12px_rgba(103,232,249,0.9)]" : "w-1.5 h-1.5 bg-white/40 group-hover:bg-white"}`} />
+                </button>
+              ))}
+            </nav>
+            <div className="hint pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 text-[10px] font-mono tracking-[0.3em] text-slate-300">
+              SCROLL · OR PRESS →
+              <ChevronDown className="hint-chev w-4 h-4 text-cyan-300" />
+            </div>
           </div>
-        </section>
+        </div>
       </div>
     </div>
   );
@@ -400,11 +458,15 @@ export function BootOverlay() {
         .fromTo(".boot-scan", { top: "-2%" }, { top: "102%", duration: 0.9, ease: "power2.inOut" }, "+=0.15")
         .to(ref.current, { clipPath: "inset(0 0 100% 0)", duration: 0.9, ease: "power3.inOut" }, "<0.1");
     }, ref);
-    return () => ctx.revert();
+    const safety = window.setTimeout(() => setGone(true), 3800); // never leave a curtain over the app
+    return () => {
+      window.clearTimeout(safety);
+      ctx.revert();
+    };
   }, []);
   if (gone) return null;
   return (
-    <div ref={ref} className="fixed inset-0 z-[80] bg-[#02060f] flex items-center justify-center" style={{ clipPath: "inset(0 0 0% 0)" }}>
+    <div ref={ref} className="pointer-events-none fixed inset-0 z-[80] bg-[#02060f] flex items-center justify-center" style={{ clipPath: "inset(0 0 0% 0)" }}>
       <div className="boot-scan absolute left-0 right-0 h-px bg-cyan-300 shadow-[0_0_30px_6px_rgba(103,232,249,0.8)]" />
       <div className="font-mono text-[13px] text-cyan-100 space-y-1.5">
         {["Linking JPL ephemeris · light time computed", "Loading crew twins · 4 astronauts", "Forecasts calibrated · 80/95 % bands", "SENTINEL ONLINE"].map((t, i) => (

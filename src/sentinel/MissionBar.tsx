@@ -1,15 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, BookOpen, ExternalLink, QrCode, X } from "lucide-react";
+import { AlertTriangle, BookOpen, ExternalLink, Film, QrCode, X } from "lucide-react";
 import type { AnatomyId } from "../data/anatomyCatalog.ts";
-import { anatomyForRisk, bandStyle, useFetch, useSentinel } from "./api.tsx";
+import { anatomyForRisk, bandStyle, fmtLight, useFetch, useSentinel } from "./api.tsx";
+import { Num } from "./Num.tsx";
 
 interface ValidationSummary { summary: { kind: string; h: number; unit: string; skill_median: number | null; coverage80: number | null; coverage95: number | null }[] }
 
-function Stat({ label, value, warn = false }: { label: string; value: string; warn?: boolean }) {
+function Stat({ label, warn = false, children }: { label: string; warn?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-col leading-tight">
-      <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400">{label}</span>
-      <span className={`text-[12px] font-mono tabular-nums ${warn ? "text-amber-200" : "text-white"}`}>{value}</span>
+    <div className="flex flex-col leading-tight shrink-0">
+      <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-slate-400 whitespace-nowrap">{label}</span>
+      <span className={`text-[12px] font-mono tabular-nums whitespace-nowrap ${warn ? "text-amber-200" : "text-white"}`}>{children}</span>
     </div>
   );
 }
@@ -21,8 +22,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto med-scroll border border-cyan-400/40 bg-[#051020] p-4" onClick={(e) => e.stopPropagation()}>
+    <div className="sx-fade fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="sx-pop w-full max-w-2xl max-h-[85vh] overflow-y-auto med-scroll border border-cyan-400/40 bg-[#051020] p-4 shadow-[0_0_80px_rgba(0,140,255,0.25)]" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold tracking-[0.14em] uppercase text-white">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
@@ -66,7 +67,8 @@ function QrPanel() {
 
 function SourcesPanel() {
   const { meta } = useSentinel();
-  const val = useFetch<ValidationSummary>("/api/validation");
+  const { missionId } = useSentinel();
+  const val = useFetch<ValidationSummary>(`/api/validation?mission=${missionId}`);
   return (
     <div className="space-y-4 text-xs">
       <section>
@@ -116,25 +118,41 @@ function SourcesPanel() {
 }
 
 export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => void }) {
-  const { mission, meta, crewId, setCrewId, earthReplyMin, setFocusRisk } = useSentinel();
+  const { mission, meta, crewId, setCrewId, earthReplyMin, setFocusRisk, missionId, setMissionId } = useSentinel();
   const [modal, setModal] = useState<"qr" | "sources" | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   if (!mission) {
     return <div className="h-12 shrink-0 bg-[#040d1c] border-b border-cyan-500/15 px-3 flex items-center text-[11px] font-mono text-slate-400">Connecting to SENTINEL engine…</div>;
   }
   const crew = mission.crew.find((c) => c.id === crewId) ?? mission.crew[0];
-  const owltMin = mission.light.owlt_s != null ? mission.light.owlt_s / 60 : null;
   const co2 = mission.env.co2;
   const dose = crew?.daily.dose;
   const top = mission.alerts.find((a) => a.severity === "act" && a.id !== dismissed);
   const onBoard = top && top.act_within_min != null && earthReplyMin != null && top.act_within_min < earthReplyMin;
+  const btn = "flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300 hover:bg-cyan-400/10 whitespace-nowrap";
+  const missions = meta?.missions ?? [];
 
   return (
     <>
-      <div className="shrink-0 bg-[#040d1c] border-b border-cyan-500/15 px-3 py-1.5 flex items-center gap-4 overflow-x-auto med-scroll z-30">
+      <div className="sx-drop shrink-0 bg-[#040d1c] border-b border-cyan-500/15 px-3 py-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 z-30">
         <div className="flex flex-col leading-tight shrink-0">
-          <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-cyan-400">{mission.mission.short}</span>
-          <span className="text-[12px] font-mono text-white">{mission.met.label} · day {mission.mission.current_day}/{mission.mission.duration_days}</span>
+          {missions.length > 1 ? (
+            <select
+              aria-label="Mission"
+              value={missionId}
+              onChange={(e) => setMissionId(e.target.value)}
+              className="bg-transparent text-[10px] font-mono uppercase tracking-[0.12em] text-cyan-300 outline-none cursor-pointer hover:text-white -ml-1"
+            >
+              {missions.map((m) => (
+                <option key={m.id} value={m.id} className="bg-[#040d1c] text-white">
+                  {m.short}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[9px] font-mono uppercase tracking-[0.12em] text-cyan-400">{mission.mission.short}</span>
+          )}
+          <span className="text-[12px] font-mono text-white whitespace-nowrap">{mission.met.label} · day {mission.mission.current_day}/{mission.mission.duration_days}</span>
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0" role="tablist" aria-label="Crew member">
@@ -149,26 +167,31 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
                 aria-selected={on}
                 onClick={() => setCrewId(c.id)}
                 title={`${c.name}, ${c.role}: health index ${Math.round(c.health_index)}`}
-                className={`flex items-center gap-1.5 px-2 py-1 border text-[11px] font-mono uppercase transition-colors ${on ? "border-cyan-300 bg-cyan-400/15 text-white" : "border-cyan-500/20 text-slate-300 hover:border-cyan-300 hover:text-white"}`}
+                className={`flex items-center gap-1.5 px-2 py-1 border text-[11px] font-mono uppercase ${on ? "border-cyan-300 bg-cyan-400/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.25)]" : "border-cyan-500/20 text-slate-300 hover:border-cyan-300 hover:text-white"}`}
               >
-                <span className={`w-2 h-2 rounded-full ${s.dot}`} />
+                <span className={`w-2 h-2 rounded-full ${s.dot} ${c.status === "act" ? "animate-pulse" : ""}`} />
                 {c.name.split(" ").slice(-1)[0]}
-                <span className="tabular-nums text-slate-400">{Math.round(c.health_index)}</span>
+                <span className="text-slate-400"><Num value={Math.round(c.health_index)} /></span>
               </button>
             );
           })}
         </div>
 
-        <div className="flex items-center gap-4 shrink-0 ml-auto">
-          <Stat label="Earth link (one way)" value={mission.light.blackout ? "BLACKOUT" : owltMin != null ? `${owltMin.toFixed(1)} min` : "—"} warn={mission.light.blackout} />
-          {co2 && <Stat label="Cabin CO₂" value={`${co2.now.toFixed(2)} ${co2.unit}`} warn={!!co2.normal && co2.now > co2.normal[1]} />}
-          {dose != null && <Stat label={`${crew.name.split(" ").slice(-1)[0]} dose / limit`} value={`${Math.round(dose)} / 600 mSv`} warn={dose > 400} />}
+        <div className="flex items-center gap-4 shrink-0">
+          <Stat label="Earth link · one way" warn={mission.light.blackout}>{mission.light.blackout ? "BLACKOUT" : fmtLight(mission.light.owlt_s)}</Stat>
+          {co2 && <Stat label="Cabin CO₂" warn={!!co2.normal && co2.now > co2.normal[1]}><Num value={co2.now} decimals={2} /> {co2.unit}</Stat>}
+          {dose != null && <Stat label={`${crew.name.split(" ").slice(-1)[0]} dose / limit`} warn={dose > 400}><Num value={Math.round(dose)} /> / 600 mSv</Stat>}
           {mission.space_weather.summary?.label && (
-            <Stat label={`Space weather${mission.space_weather.live ? " · NOAA live" : ""}`} value={mission.space_weather.summary.label} warn={mission.space_weather.summary.level > 0} />
+            <span className="hidden xl:block">
+              <Stat label={`Space weather${mission.space_weather.live ? " · NOAA live" : ""}`} warn={mission.space_weather.summary.level > 0}>{mission.space_weather.summary.label}</Stat>
+            </span>
           )}
-          <span className="px-1.5 py-0.5 border border-amber-400/50 text-[9px] font-mono tracking-wider text-amber-200">SYNTHETIC CREW</span>
-          <button type="button" onClick={() => setModal("sources")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><BookOpen className="w-3.5 h-3.5" />Sources</button>
-          <button type="button" onClick={() => setModal("qr")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><QrCode className="w-3.5 h-3.5" />Join</button>
+        </div>
+
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span className="hidden 2xl:inline px-1.5 py-0.5 border border-amber-400/50 text-[9px] font-mono tracking-wider text-amber-200 whitespace-nowrap">SYNTHETIC CREW</span>
+          <button type="button" onClick={() => setModal("sources")} className={btn}><BookOpen className="w-3.5 h-3.5" />Sources</button>
+          <button type="button" onClick={() => setModal("qr")} className={btn}><QrCode className="w-3.5 h-3.5" />Join</button>
           <button
             type="button"
             title="Replay the cinematic intro"
@@ -178,25 +201,24 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
               } catch {
                 /* ignore */
               }
-              window.location.hash = "";
-              window.location.reload();
+              window.location.assign(window.location.pathname);
             }}
-            className="px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"
+            className={btn}
           >
-            Intro
+            <Film className="w-3.5 h-3.5" />Intro
           </button>
-          <a href="/console" target="_blank" rel="noreferrer" className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300">Console<ExternalLink className="w-3 h-3" /></a>
+          <a href="/console" target="_blank" rel="noreferrer" className={btn}>Console<ExternalLink className="w-3 h-3" /></a>
         </div>
       </div>
 
       {top && (
-        <div className={`shrink-0 px-3 py-1.5 flex items-center gap-3 border-b text-xs z-30 ${onBoard ? "bg-rose-500/15 border-rose-400/40" : "bg-amber-500/10 border-amber-400/30"}`}>
-          <AlertTriangle className={`w-4 h-4 shrink-0 ${onBoard ? "text-rose-300" : "text-amber-300"}`} />
-          <span className="font-semibold text-white truncate">{top.title}</span>
+        <div key={top.id} className={`sx-alert relative overflow-hidden shrink-0 px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-b text-xs z-30 ${onBoard ? "bg-rose-500/15 border-rose-400/40" : "bg-amber-500/10 border-amber-400/30"}`}>
+          <AlertTriangle className={`w-4 h-4 shrink-0 animate-pulse ${onBoard ? "text-rose-300" : "text-amber-300"}`} />
+          <span className="font-semibold text-white">{top.title}</span>
           {top.act_within_min != null && earthReplyMin != null && (
-            <span className="font-mono text-[11px] text-slate-200 shrink-0">
+            <span className="font-mono text-[11px] text-slate-200">
               act within {top.act_within_min < 120 ? `${top.act_within_min} min` : `${Math.round(top.act_within_min / 60)} h`} · Earth reply {earthReplyMin.toFixed(1)} min
-              {onBoard && <b className="ml-2 text-rose-200">→ SENTINEL ACTS ON BOARD</b>}
+              <b className={`ml-2 ${onBoard ? "text-rose-200" : "text-cyan-200"}`}>{onBoard ? "→ SENTINEL ACTS ON BOARD" : "→ time to consult Earth"}</b>
             </span>
           )}
           <span className="ml-auto flex items-center gap-2 shrink-0">
@@ -206,7 +228,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
                 if (top.crew) setCrewId(top.crew);
                 setFocusRisk(top.risk);
                 const a = meta ? anatomyForRisk(top.risk, meta.risks) : null;
-                if (a) onOpenOrgan(a);
+                onOpenOrgan(a ?? "circulatory");
               }}
               className="px-2 py-0.5 border border-white/40 text-[11px] font-mono uppercase text-white hover:bg-white/10"
             >

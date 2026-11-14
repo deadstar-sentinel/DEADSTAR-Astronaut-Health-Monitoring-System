@@ -10,6 +10,8 @@ import {
   type LabelProjection,
   type TelemetryReadout,
 } from "../three/MedicalViewport.ts";
+import { VitalsHud } from "../sentinel/VitalsHud.tsx";
+import { SafeBoundary } from "../sentinel/SafeBoundary.tsx";
 
 export interface AnatomyViewportHandle {
   focusCameraPreset: (preset: CameraPresetId) => void;
@@ -59,6 +61,7 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
     const [ready, setReady] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [labels, setLabels] = useState<LabelProjection[]>([]);
+    const [mriManual, setMriManual] = useState<number | null>(null);
     const [telemetry, setTelemetry] = useState<TelemetryReadout>({
       azimuthDeg: 8,
       elevationDeg: 4,
@@ -128,31 +131,67 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           style={state.mode === "mri" ? { filter: "grayscale(1) contrast(1.35) brightness(1.08)" } : undefined}
         />
 
-        {/* MRI console dressing: the slice image itself is rendered by WebGL into this corner */}
+        {/* Mode / crew change: a quick scan sweep so every switch feels physical */}
+        <div key={`${state.mode}:${state.suitActive}`} className="sx-modeflash pointer-events-none absolute inset-0 z-10" />
+
+        {ready && !state.suitActive && (
+          <SafeBoundary label="Vitals">
+            <VitalsHud onSelectOrgan={onSelectOrgan} />
+          </SafeBoundary>
+        )}
+
+        {/* MRI console: the slice image itself is rendered by WebGL into this corner */}
         {ready && state.mode === "mri" && (() => {
           const el = mountRef.current;
           const side = el ? Math.round(Math.min(el.clientWidth, el.clientHeight) * 0.3) : 0;
           const z = telemetry.mriSliceY;
+          const frac = mriManual ?? (z != null ? Math.min(1, Math.max(0, z / 1.8)) : 0);
           return (
             <>
-              <div
-                className="pointer-events-none absolute border border-white/50"
-                style={{ right: 16, bottom: 16, width: side, height: side }}
-              >
-                <div className="absolute -top-5 left-0 right-0 flex justify-between text-[10px] font-mono uppercase tracking-wider text-slate-200">
-                  <span>Axial slice</span>
+              <div className="sx-pop pointer-events-none absolute border border-white/60 shadow-[0_0_30px_rgba(255,255,255,0.12)]" style={{ right: 16, bottom: 16, width: side, height: side }}>
+                <div className="absolute -top-5 left-0 right-0 flex justify-between text-[10px] font-mono uppercase tracking-wider text-slate-100">
+                  <span>Axial slice · T1-style</span>
                   <span className="tabular-nums">{z != null ? `z ${z.toFixed(2)} m` : ""}</span>
                 </div>
-                <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/70">A</span>
-                <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/70">P</span>
-                <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/70">R</span>
-                <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/70">L</span>
+                <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/80">A</span>
+                <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/80">P</span>
+                <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/80">R</span>
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/80">L</span>
               </div>
               <div
-                className="pointer-events-none absolute text-[9px] font-mono tracking-wider text-slate-400 text-right"
-                style={{ right: 16, bottom: side + 40 }}
+                className="absolute z-20 flex flex-col items-center gap-1 bg-[#040d1c]/85 border border-white/25 px-1.5 py-2"
+                style={{ right: side + 28, bottom: 16, height: side }}
               >
-                SIMULATED MRI VIEW FROM THE 3D TWIN · NOT A SCAN
+                <span className="text-[9px] font-mono text-slate-300">HEAD</span>
+                <input
+                  type="range"
+                  aria-label="MRI slice height"
+                  min={0}
+                  max={1}
+                  step={0.005}
+                  value={frac}
+                  onChange={(e) => {
+                    const f = Number(e.target.value);
+                    setMriManual(f);
+                    controllerRef.current?.setMriSlice(f);
+                  }}
+                  className="flex-1 accent-white cursor-ns-resize"
+                  style={{ writingMode: "vertical-lr", direction: "rtl", width: 16 }}
+                />
+                <span className="text-[9px] font-mono text-slate-300">FEET</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMriManual(null);
+                    controllerRef.current?.setMriSlice(null);
+                  }}
+                  className={`mt-1 px-1.5 py-0.5 border text-[9px] font-mono uppercase ${mriManual === null ? "border-white bg-white/15 text-white" : "border-white/40 text-slate-200 hover:border-white"}`}
+                >
+                  Auto
+                </button>
+              </div>
+              <div className="pointer-events-none absolute text-[9px] font-mono tracking-wider text-slate-300 text-right" style={{ right: 16, bottom: side + 40 }}>
+                SIMULATED MRI FROM THE 3D TWIN · NOT A SCAN
               </div>
             </>
           );

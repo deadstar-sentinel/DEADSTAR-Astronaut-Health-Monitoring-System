@@ -119,8 +119,8 @@ const ANATOMY_TO_ORGAN = {
 const RISK_PROTOCOL = { immune: "infection", microbe: "infection", sleep: "fatigue", behavior: "fatigue",
   systems: "fatigue", sans: "sans", bone: "bone", dynamic: "bone", hypoxia: "co2", cancer: "solar" };
 
-function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts }) {
-  const st = getState();
+function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts, mission }) {
+  const st = getState(mission && mission in MISSIONS ? mission : undefined);
   const organs = (selectedOrganId && ANATOMY_TO_ORGAN[selectedOrganId]) || [];
   const riskOrgan = Object.fromEntries(HRP_RISKS.map((r) => [r.id, r.organ]));
   const out = [];
@@ -209,6 +209,7 @@ app.post("/api/assistant", async (req, res, next) => {
     try {
       protocols = proposeProtocols({
         crewId: typeof body.crewId === "string" ? body.crewId : null,
+        mission: typeof body.mission === "string" ? body.mission : null,
         selectedOrganId: body.selectedOrganId || null,
         suitActive: Boolean(body.suitActive),
         suitAlerts: Array.isArray(body.alerts) ? body.alerts : [],

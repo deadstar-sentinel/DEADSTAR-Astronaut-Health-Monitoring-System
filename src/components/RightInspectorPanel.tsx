@@ -66,7 +66,7 @@ export function RightInspectorPanel({
   onFocusSuitComponent,
   onOpenMonitoringHud,
 }: RightInspectorPanelProps) {
-  const { crewId } = useSentinel();
+  const { crewId, missionId } = useSentinel();
   const selectedOrgan = getSelectedStructure(state);
   const selectedSuit = getSelectedSuitComponent(state);
   const [question, setQuestion] = useState("");
@@ -112,6 +112,7 @@ export function RightInspectorPanel({
           alerts: telemetrySnapshot.alerts,
           telemetrySummary,
           crewId,
+          mission: missionId,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -310,7 +311,7 @@ export function RightInspectorPanel({
             </div>
           </div>
         ) : selectedOrgan ? (
-          <div data-testid="organ-inspector-card" className="space-y-3">
+          <div data-testid="organ-inspector-card" key={selectedOrgan.id} className="sx-stagger space-y-3">
             <div className="flex items-start justify-between gap-2 border-b border-cyan-500/20 pb-2.5">
               <div>
                 <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-400">

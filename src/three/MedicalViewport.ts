@@ -151,6 +151,9 @@ export class MedicalViewportController {
   private mriCam = new THREE.OrthographicCamera(-0.34, 0.34, 0.34, -0.34, 0.01, 4);
   private mriBox: THREE.Box3 | null = null;
   private mriSliceY = 0;
+  private mriManual: number | null = null;
+  private mriScene: THREE.Scene | null = null;
+  private mriProxies: { src: THREE.Mesh; back: THREE.Mesh; front: THREE.Mesh; cap: THREE.Mesh }[] = [];
   private disposed = false;
   private activeCameraTween: gsap.core.Tween | null = null;
   private activeTargetTween: gsap.core.Tween | null = null;
@@ -1439,7 +1442,7 @@ export class MedicalViewportController {
       const on = this.state.mode === "mri";
       this.mriPlane.visible = on;
       if (on) {
-        const f = 0.5 - 0.5 * Math.cos(this.elapsedTime * 0.35); // feet -> head -> feet, ~18 s
+        const f = this.mriManual ?? 0.5 - 0.5 * Math.cos(this.elapsedTime * 0.35); // manual, or feet -> head -> feet in ~18 s
         const lo = this.mriBox.min.y + 0.04;
         this.mriSliceY = lo + f * (this.mriBox.max.y - 0.04 - lo);
         this.mriPlane.position.y = this.mriSliceY;
@@ -1614,18 +1617,102 @@ export class MedicalViewportController {
     if (this.state.mode === "mri" && this.mriBox && this.twin) this.drawMriSlice();
   }
 
-  /** Axial slice monitor: an orthographic top-down render of a 12 mm slab at the scan height, bottom-right corner. */
+  /** Manual MRI slice position (0 = soles, 1 = crown); null resumes the automatic sweep. */
+  public setMriSlice(frac: number | null) {
+    this.mriManual = frac === null ? null : THREE.MathUtils.clamp(frac, 0, 1);
+    this.requestRender();
+  }
+
+  /**
+   * Builds the cross-section scene once. Every tissue gets three proxies drawn in order:
+   * back faces (+1 stencil), front faces (-1 stencil), then a cap plane where the stencil is non-zero,
+   * i.e. exactly where the scan plane is inside that closed mesh. Greys follow a T1-weighted look
+   * (fat bright, muscle mid, air and flowing blood dark).
+   */
+  private buildMriScene() {
+    if (!this.twin) return;
+    const scene = new THREE.Scene();
+    const stencilMat = (side: THREE.Side, op: THREE.StencilOp) => {
+      const m = new THREE.MeshBasicMaterial({ side, colorWrite: false, depthWrite: false, depthTest: false });
+      m.stencilWrite = true;
+      m.stencilFunc = THREE.AlwaysStencilFunc;
+      m.stencilFail = op;
+      m.stencilZFail = op;
+      m.stencilZPass = op;
+      return m;
+    };
+    const backMat = stencilMat(THREE.BackSide, THREE.IncrementWrapStencilOp);
+    const frontMat = stencilMat(THREE.FrontSide, THREE.DecrementWrapStencilOp);
+    const capGeo = new THREE.PlaneGeometry(4, 4);
+    capGeo.rotateX(-Math.PI / 2);
+    const grey = (g: number) => {
+      const m = new THREE.MeshBasicMaterial({ depthWrite: false, depthTest: false, toneMapped: false });
+      m.color.setRGB(g, g, g, THREE.SRGBColorSpace);
+      m.stencilWrite = true;
+      m.stencilRef = 0;
+      m.stencilFunc = THREE.NotEqualStencilFunc;
+      m.stencilFail = THREE.ReplaceStencilOp;
+      m.stencilZFail = THREE.ReplaceStencilOp;
+      m.stencilZPass = THREE.ReplaceStencilOp;
+      return m;
+    };
+    const ORGAN_GREY: Partial<Record<string, number>> = {
+      lungs: 0.05, liver: 0.5, kidneys: 0.56, stomach: 0.3, pancreas: 0.53,
+      small_intestine: 0.34, large_intestine: 0.28, heart: 0.42, brain: 0.6,
+    };
+    const ORGAN_ORDER = ["lungs", "liver", "stomach", "small_intestine", "large_intestine", "pancreas", "kidneys", "heart", "brain"];
+    type Src = { mesh: THREE.Mesh; grey: number; rank: number };
+    const srcs: Src[] = this.twin.bodySkinMeshes.map((mesh) => ({ mesh, grey: 0.74, rank: 0 }));
+    for (const e of this.twin.organEntries) {
+      const id = String(e.organId);
+      if (e.role === "muscle") srcs.push({ mesh: e.mesh, grey: 0.36, rank: 1 });
+      else if (e.role === "bone") srcs.push({ mesh: e.mesh, grey: 0.9, rank: 2 });
+      else if (e.role === "nerve") srcs.push({ mesh: e.mesh, grey: 0.66, rank: 20 });
+      else if (e.role === "vessel") srcs.push({ mesh: e.mesh, grey: 0.1, rank: 21 });
+      else if (e.role === "lymph") srcs.push({ mesh: e.mesh, grey: 0.5, rank: 22 });
+      else {
+        const i = ORGAN_ORDER.indexOf(id);
+        srcs.push({ mesh: e.mesh, grey: ORGAN_GREY[id] ?? 0.46, rank: 3 + (i < 0 ? 4 : i) });
+      }
+    }
+    srcs.sort((p, q) => p.rank - q.rank);
+    const greys = new Map<number, THREE.MeshBasicMaterial>();
+    this.mriProxies = [];
+    srcs.forEach((src, i) => {
+      const back = new THREE.Mesh(src.mesh.geometry, backMat);
+      const front = new THREE.Mesh(src.mesh.geometry, frontMat);
+      let capMat = greys.get(src.grey);
+      if (!capMat) {
+        capMat = grey(src.grey);
+        greys.set(src.grey, capMat);
+      }
+      const cap = new THREE.Mesh(capGeo, capMat);
+      back.renderOrder = i * 3;
+      front.renderOrder = i * 3 + 1;
+      cap.renderOrder = i * 3 + 2;
+      for (const m of [back, front, cap]) {
+        m.matrixAutoUpdate = false;
+        m.frustumCulled = false;
+        scene.add(m);
+      }
+      this.mriProxies.push({ src: src.mesh, back, front, cap });
+    });
+    this.mriScene = scene;
+  }
+
+  /** Axial slice monitor (bottom-right): a true filled cross-section of the twin at the scan height. */
   private drawMriSlice() {
     if (!this.mriBox || !this.twin) return;
+    if (!this.mriScene) this.buildMriScene();
+    if (!this.mriScene) return;
     const r = this.renderer;
     const size = r.getSize(new THREE.Vector2());
     const s = Math.round(Math.min(size.x, size.y) * 0.3);
     const x = size.x - s - 16;
     const y = 16;
     const y0 = this.mriSliceY;
-    const h = 0.006;
     const g = this.twin.twinGroup;
-    const half = Math.max(this.mriBox.max.x - this.mriBox.min.x, this.mriBox.max.z - this.mriBox.min.z) * 0.55;
+    const half = Math.max(this.mriBox.max.x - this.mriBox.min.x, this.mriBox.max.z - this.mriBox.min.z) * 0.36;
     const cam = this.mriCam;
     cam.left = -half;
     cam.right = half;
@@ -1635,40 +1722,32 @@ export class MedicalViewportController {
     cam.position.set(g.position.x, y0 + 2, g.position.z);
     cam.up.set(0, 0, -1).applyAxisAngle(THREE.Object3D.DEFAULT_UP, g.rotation.y); // slice stays upright while the twin turns
     cam.lookAt(g.position.x, y0, g.position.z);
+    cam.updateMatrixWorld(true);
 
-    const hidden: THREE.Object3D[] = [];
-    const hide = (o: THREE.Object3D | null | undefined) => {
-      if (o && o.visible) {
-        o.visible = false;
-        hidden.push(o);
-      }
-    };
-    hide(this.mriPlane);
-    hide(this.twin.surfaceParticles);
-    hide(this.twin.emitterMotes);
+    for (const p of this.mriProxies) {
+      p.back.matrix.copy(p.src.matrixWorld);
+      p.front.matrix.copy(p.src.matrixWorld);
+      p.back.matrixWorld.copy(p.src.matrixWorld);
+      p.front.matrixWorld.copy(p.src.matrixWorld);
+      p.cap.matrix.makeTranslation(g.position.x, y0 - 0.0008, g.position.z);
+      p.cap.matrixWorld.copy(p.cap.matrix);
+    }
 
-    const bg = this.scene.background;
-    const fog = this.scene.fog;
-    this.scene.background = null; // pure black scanner field, no lab backdrop or haze in the slice
-    this.scene.fog = null;
     const prevColor = r.getClearColor(new THREE.Color());
     const prevAlpha = r.getClearAlpha();
+    const prevAuto = r.autoClear;
+    r.autoClear = true;
     r.setScissorTest(true);
     r.setScissor(x, y, s, s);
     r.setViewport(x, y, s, s);
     r.setClearColor(0x000000, 1);
-    r.clippingPlanes = [
-      new THREE.Plane(new THREE.Vector3(0, -1, 0), y0 + h),
-      new THREE.Plane(new THREE.Vector3(0, 1, 0), -(y0 - h)),
-    ];
-    r.render(this.scene, cam);
+    r.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), y0)];
+    r.render(this.mriScene, cam);
     r.clippingPlanes = [];
     r.setClearColor(prevColor, prevAlpha);
+    r.autoClear = prevAuto;
     r.setScissorTest(false);
     r.setViewport(0, 0, size.x, size.y);
-    this.scene.background = bg;
-    this.scene.fog = fog;
-    for (const o of hidden) o.visible = true;
   }
 
   public dispose() {

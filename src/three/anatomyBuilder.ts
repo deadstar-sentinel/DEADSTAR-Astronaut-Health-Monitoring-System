@@ -886,6 +886,160 @@ function buildProceduralVenousNetwork(bodyBox: THREE.Box3, parent: THREE.Group):
   return meshes;
 }
 
+const ARM_PART = /delt|biceps|triceps|forearm|nerve_brachial|vein_arm/i;
+const LEG_PART = /adductor|gastroc|ham_|rectus_fem|sartorius|tibialis|vastus|nerve_femoral|nerve_sciatic|vein_leg/i;
+
+/**
+ * Fits procedural limb geometry to the loaded body.
+ * Arms: rotate + scale the authored shoulder->wrist line onto the measured arm-bone line.
+ * Legs: shear each height slice so the authored leg centre lands on the real leg's centre.
+ */
+function retargetLimbs(
+  scene: THREE.Object3D,
+  skins: THREE.Mesh[],
+  invTwin: THREE.Matrix4,
+  bodyBox: THREE.Box3,
+  meshes: THREE.Mesh[],
+) {
+  const minY = bodyBox.min.y;
+  const h = bodyBox.max.y - bodyBox.min.y;
+  const yAt = (f: number) => minY + h * f;
+  const v = new THREE.Vector3();
+  const smooth = THREE.MathUtils.smoothstep;
+  const touched = new Set<THREE.Mesh>();
+
+  // ---- real leg centre per height, measured from the skin
+  const BINS = 14;
+  const yLo = yAt(0.04);
+  const yHi = yAt(0.48);
+  const legX: number[][] = [[], []];
+  const legZ: number[][] = [[], []];
+  const acc = [0, 1].map(() =>
+    Array.from({ length: BINS }, () => ({ x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity, n: 0 })),
+  );
+  for (const skin of skins) {
+    const m = new THREE.Matrix4().multiplyMatrices(invTwin, skin.matrixWorld);
+    const pos = skin.geometry.getAttribute("position");
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m);
+      if (v.y < yLo || v.y > yHi) continue;
+      const ax = Math.abs(v.x);
+      if (ax < 0.015 || ax > 0.27) continue; // skip the mid-line and the hands hanging beside the thighs
+      const b = Math.min(BINS - 1, Math.floor(((v.y - yLo) / (yHi - yLo)) * BINS));
+      const a = acc[v.x > 0 ? 1 : 0][b];
+      a.x0 = Math.min(a.x0, ax);
+      a.x1 = Math.max(a.x1, ax);
+      a.z0 = Math.min(a.z0, v.z);
+      a.z1 = Math.max(a.z1, v.z);
+      a.n++;
+    }
+  }
+  let legsOk = true;
+  for (const si of [0, 1]) {
+    for (let b = 0; b < BINS; b++) {
+      const a = acc[si][b];
+      if (a.n < 2) {
+        legX[si].push(NaN);
+        legZ[si].push(NaN);
+      } else {
+        legX[si].push((a.x0 + a.x1) / 2);
+        legZ[si].push((a.z0 + a.z1) / 2);
+      }
+    }
+    // fill sparse bins from their neighbours
+    for (const arr of [legX[si], legZ[si]]) {
+      for (let b = 0; b < BINS; b++) {
+        if (!Number.isNaN(arr[b])) continue;
+        let lo = b - 1;
+        let hi = b + 1;
+        while (lo >= 0 && Number.isNaN(arr[lo])) lo--;
+        while (hi < BINS && Number.isNaN(arr[hi])) hi++;
+        if (lo < 0 && hi >= BINS) legsOk = false;
+        else if (lo < 0) arr[b] = arr[hi];
+        else if (hi >= BINS) arr[b] = arr[lo];
+        else arr[b] = arr[lo] + ((arr[hi] - arr[lo]) * (b - lo)) / (hi - lo);
+      }
+    }
+  }
+  const sample = (arr: number[], y: number) => {
+    const f = THREE.MathUtils.clamp(((y - yLo) / (yHi - yLo)) * BINS - 0.5, 0, BINS - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(BINS - 1, i0 + 1);
+    return arr[i0] + (arr[i1] - arr[i0]) * (f - i0);
+  };
+  const authLegX = (y: number) => THREE.MathUtils.lerp(0.11, 0.096, THREE.MathUtils.clamp((y - yAt(0.06)) / (yAt(0.5) - yAt(0.06)), 0, 1));
+  const AUTH_LEG_Z = -0.012;
+
+  // ---- real arm line per side, from the arm bones
+  const bones = scene.getObjectByName("ORG_bones_arm") as THREE.Mesh | undefined;
+  const arm: ({ sh: THREE.Vector3; wr: THREE.Vector3 } | null)[] = [null, null];
+  if (bones) {
+    const toLocal = new THREE.Matrix4().multiplyMatrices(invTwin, bones.matrixWorld);
+    const pos = bones.geometry.getAttribute("position");
+    const pts: THREE.Vector3[][] = [[], []];
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(toLocal);
+      if (Math.abs(v.x) > 0.02) pts[v.x > 0 ? 1 : 0].push(v.clone());
+    }
+    for (const si of [0, 1]) {
+      if (pts[si].length < 10) continue;
+      const sh = pts[si].reduce((a, b) => (b.y > a.y ? b : a));
+      const wr = pts[si].reduce((a, b) => (b.distanceToSquared(sh) > a.distanceToSquared(sh) ? b : a));
+      arm[si] = { sh, wr };
+    }
+  }
+
+  for (const mesh of meshes) {
+    const isArm = ARM_PART.test(mesh.name);
+    const isLeg = LEG_PART.test(mesh.name) && legsOk;
+    if (!isArm && !isLeg) continue;
+    const g = mesh.geometry.getAttribute("position");
+    for (let i = 0; i < g.count; i++) {
+      const x = g.getX(i);
+      const y = g.getY(i);
+      const z = g.getZ(i);
+      const side = x >= 0 ? 1 : -1;
+      const si = side > 0 ? 1 : 0;
+      if (isArm) {
+        const a = arm[si];
+        if (!a) continue;
+        const oShX = side * 0.185;
+        const oShY = yAt(0.79);
+        const odx = side * 0.105;
+        const ody = yAt(0.49) - oShY;
+        const ndx = a.wr.x - a.sh.x;
+        const ndy = a.wr.y - a.sh.y;
+        const rot = Math.atan2(ndy, ndx) - Math.atan2(ody, odx);
+        const k = Math.hypot(ndx, ndy) / Math.hypot(odx, ody);
+        const c = Math.cos(rot) * k;
+        const sn = Math.sin(rot) * k;
+        const w = smooth(side * x, 0.12, 0.185); // torso-side ends stay attached
+        const dx = x - oShX;
+        const dy = y - oShY;
+        const q = THREE.MathUtils.clamp((dx * odx + dy * ody) / (odx * odx + ody * ody), 0, 1.15);
+        const nx = a.sh.x + c * dx - sn * dy;
+        const ny = a.sh.y + sn * dx + c * dy;
+        const nz = z + THREE.MathUtils.lerp(a.sh.z, a.wr.z, q) - 0.008;
+        g.setXYZ(i, x + (nx - x) * w, y + (ny - y) * w, z + (nz - z) * w);
+      } else {
+        if (Math.abs(x) < 0.004) continue;
+        const w = 1 - smooth(y, yAt(0.43), yAt(0.5)); // blends out into the pelvis
+        if (w <= 0) continue;
+        const dx = sample(legX[si], y) - authLegX(y);
+        const dz = sample(legZ[si], y) - AUTH_LEG_Z;
+        g.setXYZ(i, x + side * dx * w, y, z + dz * w);
+      }
+    }
+    g.needsUpdate = true;
+    touched.add(mesh);
+  }
+  for (const mesh of touched) {
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingBox();
+    mesh.geometry.computeBoundingSphere();
+  }
+}
+
 export async function loadAndBuildAnatomyTwin(
   isSoftwareGl: boolean,
   onProgress?: (pct: number) => void,
@@ -1038,6 +1192,9 @@ export async function loadAndBuildAnatomyTwin(
 
   const veinMeshes = buildProceduralVenousNetwork(bodyBox, twinGroup);
   registerProcedural(veinMeshes, "circulatory", "vessel");
+
+  // The procedural limbs were authored on a placeholder body: retarget them onto the realistic twin's real limbs.
+  retargetLimbs(gltf.scene, bodySkinMeshes, invTwin, bodyBox, [...muscularMeshes, ...nervousMeshes, ...veinMeshes]);
 
   // Sample holographic surface points on Body mesh
   let surfaceParticles: THREE.Points | null = null;

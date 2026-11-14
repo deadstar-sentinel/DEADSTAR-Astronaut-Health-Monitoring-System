@@ -13,6 +13,7 @@ export interface CrewSummary {
   status: Band | string;
   source: string;
   daily: Record<string, number>;
+  vitals?: Record<string, number>;
 }
 
 export interface Alert {
@@ -62,6 +63,7 @@ export interface Forecast {
 export interface Source { title: string; url: string; note?: string }
 export interface HrpRisk { id: string; name: string; group: string; url: string; organ: string }
 export interface Meta {
+  missions?: { id: string; name: string; short: string }[];
   sources: Record<string, Source>;
   risks: HrpRisk[];
   signals: Record<string, { label: string; unit: string; normal?: [number, number]; decimals?: number }>;
@@ -119,20 +121,20 @@ async function getJson<T>(url: string): Promise<T> {
   return (await r.json()) as T;
 }
 
-export function useFetch<T>(url: string | null, refreshMs = 0): T | null {
+export function useFetch<T>(url: string | null, refreshMs = 0, keepStale = false): T | null {
   const [data, setData] = useState<T | null>(null);
   useEffect(() => {
     if (!url) return;
     let alive = true;
     const load = () => getJson<T>(url).then((d) => alive && setData(d)).catch(() => {});
-    setData(null);
+    if (!keepStale) setData(null);
     load();
     const id = refreshMs ? window.setInterval(load, refreshMs) : 0;
     return () => {
       alive = false;
       if (id) window.clearInterval(id);
     };
-  }, [url, refreshMs]);
+  }, [url, refreshMs, keepStale]);
   return data;
 }
 
@@ -143,21 +145,28 @@ interface SentinelCtx {
   crewId: string;
   setCrewId: (id: string) => void;
   earthReplyMin: number | null;   // round trip + ground response, from the engine
+  missionId: string;              // this client's mission (never the server-wide default)
+  setMissionId: (id: string) => void;
   focusRisk: string | null;       // set by an alert's "Show me": the card opens on exactly that risk
   setFocusRisk: (id: string | null) => void;
 }
 const Ctx = createContext<SentinelCtx | null>(null);
 
 export function SentinelProvider({ children }: { children: ReactNode }) {
-  const mission = useFetch<MissionState>("/api/state", 20000);
+  const [missionId, setMissionId] = useState("mars_transit");
+  const mission = useFetch<MissionState>(`/api/state?mission=${missionId}`, 20000, true);
   const meta = useFetch<Meta>("/api/meta");
   const [crewId, setCrewId] = useState("mori");
   const [focusRisk, setFocusRisk] = useState<string | null>(null);
   const fromAlert = mission?.alerts.find((a) => typeof a.earth_reply_min === "number")?.earth_reply_min;
   const owlt = mission?.light.owlt_s;
   const earthReplyMin = fromAlert ?? (typeof owlt === "number" ? (2 * owlt) / 60 + 30 : null);
+  const crewIds = mission?.crew.map((c) => c.id).join(",") ?? "";
+  useEffect(() => {
+    if (crewIds && !crewIds.split(",").includes(crewId)) setCrewId(crewIds.split(",")[0]);
+  }, [crewIds, crewId]);
   return (
-    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin, focusRisk, setFocusRisk }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin, missionId, setMissionId, focusRisk, setFocusRisk }}>{children}</Ctx.Provider>
   );
 }
 
@@ -173,3 +182,9 @@ export const BAND_STYLE: Record<string, { label: string; text: string; border: s
   nominal: { label: "NOMINAL", text: "text-emerald-200", border: "border-emerald-400/50", bg: "bg-emerald-500/10", dot: "bg-emerald-400" },
 };
 export const bandStyle = (b: string | undefined) => BAND_STYLE[b ?? "nominal"] ?? BAND_STYLE.nominal;
+
+/** One-way light time for humans: seconds near Earth, minutes in deep space. */
+export function fmtLight(owltS: number | null | undefined): string {
+  if (owltS == null) return "—";
+  return owltS < 90 ? `${owltS.toFixed(1)} s` : `${(owltS / 60).toFixed(1)} min`;
+}
