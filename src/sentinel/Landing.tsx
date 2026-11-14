@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ChevronDown, Play, Square } from "lucide-react";
-import { ParticleStage, type StageRig } from "./ParticleStage.tsx";
+import { EARTH_X, ParticleStage, SHIP_X, type StageRig } from "./ParticleStage.tsx";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -70,7 +70,7 @@ const Kicker = ({ children }: { children: ReactNode }) => (
 function Scene({ i, side, children }: { i: number; side: "left" | "right" | "center"; children: ReactNode }) {
   const align = side === "left" ? "lg:justify-start" : side === "right" ? "lg:justify-end" : "lg:justify-center";
   return (
-    <section className={`sc sc-${i} absolute inset-0 flex items-end lg:items-center justify-center ${align} px-6 lg:px-[7vw] pb-20 lg:pb-0`} style={i > 0 ? { visibility: "hidden", opacity: 0 } : undefined}>
+    <section className={`sc sc-${i} absolute inset-0 flex items-end lg:items-center justify-center ${align} px-6 lg:px-[7vw] ${side === "right" ? "lg:pr-[12vw]" : ""} pb-20 lg:pb-0`} style={i > 0 ? { visibility: "hidden", opacity: 0 } : undefined}>
       <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : i === 0 ? "lg:max-w-[56vw]" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-0 p-4 lg:p-0`}>{children}</div>
     </section>
   );
@@ -97,6 +97,21 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
     [],
   );
   const max = Math.max(s.actMin, s.earthMin) * 1.08;
+  // where Earth and the ship land on screen in the distance scene (same maths as the stage camera)
+  const [geo, setGeo] = useState({ earthX: 19, earthY: 70, shipX: 81, shipY: 59 });
+  useEffect(() => {
+    const place = () => {
+      const aspect = window.innerWidth / window.innerHeight;
+      const fit = aspect < 1.25 ? 1 + (1.25 - aspect) * 1.6 : 1;
+      const halfH = 7.4 * fit * Math.tan((34 * Math.PI) / 360);
+      const halfW = halfH * aspect;
+      const fx = (x: number) => 50 + (x / (2 * halfW)) * 100;
+      setGeo({ earthX: fx(EARTH_X), earthY: 50 + (0.78 / (2 * halfH)) * 100 + 4, shipX: fx(SHIP_X), shipY: 50 + (0.2 / (2 * halfH)) * 100 + 4 });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, []);
 
   const leave = () => {
     if (left.current) return;
@@ -231,7 +246,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       tl.from(".sc-4 .rv", { y: 24, opacity: 0, stagger: 0.05, duration: 0.16 }, 3.92);
       tl.from(".stat", { y: 40, opacity: 0, rotateX: -20, stagger: 0.05, duration: 0.18 }, 4.0);
       // 4 -> 5 enter
-      morph(5, 4.7, { x: 0, rotY: 0, camZ: 4.0, organs: 0.9, bright: 1.25 });
+      morph(5, 4.7, { x: 0.95, rotY: -0.3, camZ: 4.5, organs: 0.75, bright: 1.05 });
       scene(5);
       tl.from(".sc-5 .rv", { y: 24, opacity: 0, stagger: 0.06, duration: 0.18 }, 4.94);
       tl.to({}, { duration: 0.01 }, DUR - 0.01);
@@ -329,9 +344,9 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                   <div className="rv"><Kicker>01 · The distance</Kicker></div>
                   <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Help is a <span className="text-cyan-300">light-speed</span> round trip away.</h2>
                 </div>
-                <div className="w-full max-w-6xl flex justify-between text-[11px] font-mono uppercase tracking-[0.2em] translate-y-[17vh]">
-                  <span className="rv text-sky-300 text-left">Earth<br /><span className="text-slate-400">flight surgeon</span></span>
-                  <span className="rv text-rose-300 text-right">Crew<br /><span className="text-slate-400">Mars transit · day {s.day}/{s.duration}</span></span>
+                <div className="absolute inset-0 text-[11px] font-mono uppercase tracking-[0.2em]">
+                  <span className="rv absolute -translate-x-1/2 text-center text-sky-300" style={{ left: `${geo.earthX}%`, top: `${geo.earthY}%` }}>Earth<br /><span className="text-slate-400">flight surgeon</span></span>
+                  <span className="rv absolute -translate-x-1/2 text-center text-rose-300" style={{ left: `${geo.shipX}%`, top: `${geo.shipY}%` }}>Crew<br /><span className="text-slate-400 whitespace-nowrap">Mars transit · day {s.day}/{s.duration}</span></span>
                 </div>
                 <div>
                   <div className="rv flex items-end justify-center gap-3">
@@ -351,11 +366,11 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                 <p className="rv mt-3 text-slate-300">{s.crewName}: temperature, heart rate and HRV are drifting together. Chance of fever ≥ 38 °C within 24 h: <b className="fever-n text-white tabular-nums">0%</b></p>
                 <div className="rv mt-8 space-y-5">
                   <div>
-                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-rose-200"><span>Act within</span><span>{s.actMin} min</span></div>
+                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-rose-200"><span>Act within</span><span className="whitespace-nowrap">{s.actMin} min</span></div>
                     <div className="mt-1.5 h-4 bg-white/5"><div className="bar-act h-full origin-left bg-gradient-to-r from-rose-500 to-rose-300 shadow-[0_0_24px_rgba(251,113,133,0.5)]" style={{ width: `${(s.actMin / max) * 100}%` }} /></div>
                   </div>
                   <div>
-                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-sky-200"><span>Earth's answer arrives</span><span>{s.earthMin.toFixed(1)} min</span></div>
+                    <div className="flex justify-between text-[12px] font-mono uppercase tracking-[0.15em] text-sky-200"><span>Earth's answer arrives</span><span className="whitespace-nowrap">{s.earthMin.toFixed(1)} min</span></div>
                     <div className="mt-1.5 h-4 bg-white/5"><div className="bar-earth h-full origin-left bg-gradient-to-r from-sky-500 to-sky-300 shadow-[0_0_24px_rgba(56,189,248,0.5)]" style={{ width: `${(s.earthMin / max) * 100}%` }} /></div>
                   </div>
                 </div>
@@ -406,9 +421,10 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
               </Scene>
 
               {/* 5 · ENTER */}
-              <section className="sc sc-5 absolute inset-0 flex flex-col items-center justify-end pb-[12vh] px-6 text-center" style={{ visibility: "hidden", opacity: 0 }}>
-                <h2 className="rv text-4xl sm:text-6xl font-semibold leading-tight">Meet the crew.</h2>
-                <p className="rv mt-3 text-slate-200 max-w-xl">Four synthetic astronauts. Day {s.day} of a {s.duration}-day Mars transit. One of them needs you now.</p>
+              <Scene i={5} side="left">
+                <div className="rv"><Kicker>Mission control</Kicker></div>
+                <h2 className="rv mt-3 text-4xl sm:text-6xl font-semibold leading-tight">Meet the crew.</h2>
+                <p className="rv mt-4 text-lg text-slate-200">Four synthetic astronauts. Day {s.day} of a {s.duration}-day Mars transit. One of them needs you now.</p>
                 <div className="rv relative inline-block mt-8">
                   <span className="cta-ring absolute inset-0 border border-cyan-300 pointer-events-none" />
                   <button type="button" onClick={leave} className="pointer-events-auto relative px-10 py-4 bg-cyan-300 text-[#02060f] text-sm font-semibold uppercase tracking-[0.25em] hover:bg-white shadow-[0_0_50px_rgba(103,232,249,0.55)]">
@@ -416,7 +432,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                   </button>
                 </div>
                 <p className="rv mt-6 text-[10px] font-mono tracking-[0.25em] text-slate-400">SYNTHETIC CREW · DECISION SUPPORT, NOT DIAGNOSIS</p>
-              </section>
+              </Scene>
             </div>
 
             {/* chrome: progress, scene dots, film, skip */}

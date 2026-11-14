@@ -28,7 +28,7 @@ export const SHAPES: ShapeId[] = ["body", "earth", "body", "body", "helix", "bod
 export const EARTH_X = -2.25;
 export const SHIP_X = 2.25;
 const MID_Y = 0.95;
-const GAIN: Record<ShapeId, number> = { body: 0.17, earth: 0.5, helix: 0.2 };
+const GAIN: Record<ShapeId, number> = { body: 0.15, earth: 0.5, helix: 0.2 };
 
 interface Shape {
   pos: Float32Array;
@@ -192,7 +192,7 @@ const VERT = /* glsl */ `
 
     vec3 c = mix(aColFrom, aColTo, m);
     float inner = step(0.5, aKind);
-    c *= mix(1.0, mix(1.2 - 0.6 * uOrgans, 0.6 + 2.6 * uOrgans, inner), uKindOn);
+    c *= mix(1.0, mix(1.0 - 0.5 * uOrgans, 0.45 + 1.2 * uOrgans, inner), uKindOn);
     // scan sweep up the subject
     float sweep = exp(-pow((p.y - (mod(uTime * 0.45, 2.6) - 0.3)) * 9.0, 2.0));
     c += vec3(0.25, 0.6, 0.7) * sweep * 0.55 * uKindOn;
