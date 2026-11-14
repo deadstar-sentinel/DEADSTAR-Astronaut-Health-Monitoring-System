@@ -58,6 +58,8 @@ export interface TelemetryReadout {
   azimuthDeg: number;
   elevationDeg: number;
   zoomDistance: number;
+  /** MRI mode: height of the scan slice above the floor (m). */
+  mriSliceY?: number;
 }
 
 export interface ViewportCallbacks {
@@ -144,6 +146,11 @@ export class MedicalViewportController {
   private frameId = 0;
   private renderBusy = false;
   private renderDirty = false;
+  // MRI mode: a scan plane sweeps the body; the axial slab at that height is drawn as a slice monitor.
+  private mriPlane: THREE.Mesh | null = null;
+  private mriCam = new THREE.OrthographicCamera(-0.34, 0.34, 0.34, -0.34, 0.01, 4);
+  private mriBox: THREE.Box3 | null = null;
+  private mriSliceY = 0;
   private disposed = false;
   private activeCameraTween: gsap.core.Tween | null = null;
   private activeTargetTween: gsap.core.Tween | null = null;
@@ -349,6 +356,23 @@ export class MedicalViewportController {
         return;
       }
       this.twin = built;
+      built.twinGroup.updateMatrixWorld(true);
+      this.mriBox = new THREE.Box3();
+      for (const m of built.bodySkinMeshes) this.mriBox.expandByObject(m);
+      if (!this.mriBox.isEmpty()) {
+        const sz = this.mriBox.getSize(new THREE.Vector3());
+        const planeGeo = new THREE.PlaneGeometry(Math.max(sz.x, 0.7) * 1.15, Math.max(sz.z, 0.35) * 1.8);
+        planeGeo.rotateX(-Math.PI / 2);
+        const plane = new THREE.Mesh(
+          planeGeo,
+          new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.08, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }),
+        );
+        plane.add(new THREE.LineSegments(new THREE.EdgesGeometry(planeGeo), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })));
+        plane.visible = false;
+        plane.renderOrder = 10;
+        this.scene.add(plane);
+        this.mriPlane = plane;
+      }
       this.scene.add(built.twinGroup);
 
       built.twinGroup.traverse((obj) => {
@@ -658,7 +682,7 @@ export class MedicalViewportController {
   private applyStateVisuals() {
     if (!this.twin) return;
     const {
-      mode,
+      mode: rawMode,
       selectedOrganId,
       selectedSuitComponentId,
       isolated,
@@ -667,6 +691,8 @@ export class MedicalViewportController {
       display,
       suitActive,
     } = this.state;
+    // MRI reuses the x-ray tissue materials; the grayscale look and the slice are layered on top.
+    const mode = rawMode === "mri" ? "xray" : rawMode;
 
     const suitAlpha = this.currentSuitProgress;
     const explodeAmt = this.currentExplodeProgress;
@@ -1409,6 +1435,17 @@ export class MedicalViewportController {
       }
     }
 
+    if (this.mriPlane && this.mriBox) {
+      const on = this.state.mode === "mri";
+      this.mriPlane.visible = on;
+      if (on) {
+        const f = 0.5 - 0.5 * Math.cos(this.elapsedTime * 0.35); // feet -> head -> feet, ~18 s
+        const lo = this.mriBox.min.y + 0.04;
+        this.mriSliceY = lo + f * (this.mriBox.max.y - 0.04 - lo);
+        this.mriPlane.position.y = this.mriSliceY;
+      }
+    }
+
     this.controls.update();
 
     const now = performance.now();
@@ -1427,6 +1464,8 @@ export class MedicalViewportController {
         azimuthDeg: azimuth,
         elevationDeg: elevation,
         zoomDistance: Number(dist.toFixed(2)),
+        mriSliceY:
+          this.state.mode === "mri" && this.mriBox ? Number((this.mriSliceY - this.mriBox.min.y).toFixed(2)) : undefined,
       });
 
       this.projectLabels();
@@ -1572,6 +1611,64 @@ export class MedicalViewportController {
     } else {
       this.renderer.render(this.scene, this.camera);
     }
+    if (this.state.mode === "mri" && this.mriBox && this.twin) this.drawMriSlice();
+  }
+
+  /** Axial slice monitor: an orthographic top-down render of a 12 mm slab at the scan height, bottom-right corner. */
+  private drawMriSlice() {
+    if (!this.mriBox || !this.twin) return;
+    const r = this.renderer;
+    const size = r.getSize(new THREE.Vector2());
+    const s = Math.round(Math.min(size.x, size.y) * 0.3);
+    const x = size.x - s - 16;
+    const y = 16;
+    const y0 = this.mriSliceY;
+    const h = 0.006;
+    const g = this.twin.twinGroup;
+    const half = Math.max(this.mriBox.max.x - this.mriBox.min.x, this.mriBox.max.z - this.mriBox.min.z) * 0.55;
+    const cam = this.mriCam;
+    cam.left = -half;
+    cam.right = half;
+    cam.top = half;
+    cam.bottom = -half;
+    cam.updateProjectionMatrix();
+    cam.position.set(g.position.x, y0 + 2, g.position.z);
+    cam.up.set(0, 0, -1).applyAxisAngle(THREE.Object3D.DEFAULT_UP, g.rotation.y); // slice stays upright while the twin turns
+    cam.lookAt(g.position.x, y0, g.position.z);
+
+    const hidden: THREE.Object3D[] = [];
+    const hide = (o: THREE.Object3D | null | undefined) => {
+      if (o && o.visible) {
+        o.visible = false;
+        hidden.push(o);
+      }
+    };
+    hide(this.mriPlane);
+    hide(this.twin.surfaceParticles);
+    hide(this.twin.emitterMotes);
+
+    const bg = this.scene.background;
+    const fog = this.scene.fog;
+    this.scene.background = null; // pure black scanner field, no lab backdrop or haze in the slice
+    this.scene.fog = null;
+    const prevColor = r.getClearColor(new THREE.Color());
+    const prevAlpha = r.getClearAlpha();
+    r.setScissorTest(true);
+    r.setScissor(x, y, s, s);
+    r.setViewport(x, y, s, s);
+    r.setClearColor(0x000000, 1);
+    r.clippingPlanes = [
+      new THREE.Plane(new THREE.Vector3(0, -1, 0), y0 + h),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -(y0 - h)),
+    ];
+    r.render(this.scene, cam);
+    r.clippingPlanes = [];
+    r.setClearColor(prevColor, prevAlpha);
+    r.setScissorTest(false);
+    r.setViewport(0, 0, size.x, size.y);
+    this.scene.background = bg;
+    this.scene.fog = fog;
+    for (const o of hidden) o.visible = true;
   }
 
   public dispose() {

@@ -48,6 +48,7 @@ interface LeftControlPanelProps {
 const MODE_ICONS: Record<VisualizationMode, typeof Sparkles> = {
   holographic: Sparkles,
   xray: Scan,
+  mri: Scan,
   organ: Layers,
   muscular: Activity,
   nervous: Brain,

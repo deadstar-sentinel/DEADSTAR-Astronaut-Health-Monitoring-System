@@ -125,7 +125,38 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           ref={mountRef}
           data-testid="anatomy-canvas-mount"
           className="w-full h-full cursor-grab active:cursor-grabbing"
+          style={state.mode === "mri" ? { filter: "grayscale(1) contrast(1.35) brightness(1.08)" } : undefined}
         />
+
+        {/* MRI console dressing: the slice image itself is rendered by WebGL into this corner */}
+        {ready && state.mode === "mri" && (() => {
+          const el = mountRef.current;
+          const side = el ? Math.round(Math.min(el.clientWidth, el.clientHeight) * 0.3) : 0;
+          const z = telemetry.mriSliceY;
+          return (
+            <>
+              <div
+                className="pointer-events-none absolute border border-white/50"
+                style={{ right: 16, bottom: 16, width: side, height: side }}
+              >
+                <div className="absolute -top-5 left-0 right-0 flex justify-between text-[10px] font-mono uppercase tracking-wider text-slate-200">
+                  <span>Axial slice</span>
+                  <span className="tabular-nums">{z != null ? `z ${z.toFixed(2)} m` : ""}</span>
+                </div>
+                <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/70">A</span>
+                <span className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-white/70">P</span>
+                <span className="absolute left-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/70">R</span>
+                <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] font-mono text-white/70">L</span>
+              </div>
+              <div
+                className="pointer-events-none absolute text-[9px] font-mono tracking-wider text-slate-400 text-right"
+                style={{ right: 16, bottom: side + 40 }}
+              >
+                SIMULATED MRI VIEW FROM THE 3D TWIN · NOT A SCAN
+              </div>
+            </>
+          );
+        })()}
 
         {/* Top-left 360° Spatial Telemetry + Controls Hint */}
         <div

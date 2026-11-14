@@ -1,6 +1,7 @@
 export type VisualizationMode =
   | "holographic"
   | "xray"
+  | "mri"
   | "organ"
   | "muscular"
   | "nervous"
@@ -84,6 +85,13 @@ export const VISUALIZATION_MODES: VisualizationModeMeta[] = [
     shortLabel: "X-Ray",
     description: "High-contrast skeletal radiography with sheer translucent outer tissue envelope.",
     accentHex: "#9FE8FF",
+  },
+  {
+    id: "mri",
+    label: "MRI Scan Mode",
+    shortLabel: "MRI",
+    description: "Grayscale MRI-style view: a scan plane sweeps head to toe while the axial slice at that level is shown live.",
+    accentHex: "#E5E7EB",
   },
   {
     id: "organ",

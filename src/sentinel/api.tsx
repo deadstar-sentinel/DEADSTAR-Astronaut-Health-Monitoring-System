@@ -86,6 +86,24 @@ export const ORGAN_LINK: Record<AnatomyId, { organ: string | null; signal: strin
   muscular: { organ: "legs", signal: "muscle", horizon: "30d" },
 };
 
+/** Best signal + horizon to forecast for each HRP risk id. */
+export const RISK_SIGNAL: Record<string, { signal: string; horizon: string }> = {
+  immune: { signal: "temp", horizon: "24h" },
+  sans: { signal: "onsd", horizon: "30d" },
+  sleep: { signal: "sleep_h", horizon: "7d" },
+  behavior: { signal: "cognition", horizon: "7d" },
+  teamwork: { signal: "cognition", horizon: "7d" },
+  systems: { signal: "pvt", horizon: "7d" },
+  bone: { signal: "bmd", horizon: "30d" },
+  dynamic: { signal: "bmd", horizon: "30d" },
+  cardio: { signal: "plasma", horizon: "30d" },
+  hypoxia: { signal: "spo2", horizon: "24h" },
+  fitness: { signal: "muscle", horizon: "30d" },
+  cancer: { signal: "dose", horizon: "30d" },
+  nutrition: { signal: "mass", horizon: "30d" },
+  microbe: { signal: "temp", horizon: "24h" },
+};
+
 /** Which anatomy structure to open for an alert's HRP risk id. */
 export function anatomyForRisk(riskId: string, risks: HrpRisk[]): AnatomyId | null {
   const organ = risks.find((r) => r.id === riskId)?.organ;
@@ -125,6 +143,8 @@ interface SentinelCtx {
   crewId: string;
   setCrewId: (id: string) => void;
   earthReplyMin: number | null;   // round trip + ground response, from the engine
+  focusRisk: string | null;       // set by an alert's "Show me": the card opens on exactly that risk
+  setFocusRisk: (id: string | null) => void;
 }
 const Ctx = createContext<SentinelCtx | null>(null);
 
@@ -132,11 +152,12 @@ export function SentinelProvider({ children }: { children: ReactNode }) {
   const mission = useFetch<MissionState>("/api/state", 20000);
   const meta = useFetch<Meta>("/api/meta");
   const [crewId, setCrewId] = useState("mori");
+  const [focusRisk, setFocusRisk] = useState<string | null>(null);
   const fromAlert = mission?.alerts.find((a) => typeof a.earth_reply_min === "number")?.earth_reply_min;
   const owlt = mission?.light.owlt_s;
   const earthReplyMin = fromAlert ?? (typeof owlt === "number" ? (2 * owlt) / 60 + 30 : null);
   return (
-    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin, focusRisk, setFocusRisk }}>{children}</Ctx.Provider>
   );
 }
 

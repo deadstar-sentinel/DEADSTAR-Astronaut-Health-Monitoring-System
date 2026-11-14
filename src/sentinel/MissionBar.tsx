@@ -116,7 +116,7 @@ function SourcesPanel() {
 }
 
 export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => void }) {
-  const { mission, meta, crewId, setCrewId, earthReplyMin } = useSentinel();
+  const { mission, meta, crewId, setCrewId, earthReplyMin, setFocusRisk } = useSentinel();
   const [modal, setModal] = useState<"qr" | "sources" | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   if (!mission) {
@@ -188,6 +188,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
               type="button"
               onClick={() => {
                 if (top.crew) setCrewId(top.crew);
+                setFocusRisk(top.risk);
                 const a = meta ? anatomyForRisk(top.risk, meta.risks) : null;
                 if (a) onOpenOrgan(a);
               }}

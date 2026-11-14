@@ -19,6 +19,8 @@ import {
 } from "../utils/simulationState.ts";
 import { ForecastCard } from "../sentinel/ForecastCard.tsx";
 import { SafeBoundary } from "../sentinel/SafeBoundary.tsx";
+import { ProtocolList, type ProposedProtocol } from "../sentinel/ProtocolList.tsx";
+import { useSentinel } from "../sentinel/api.tsx";
 
 interface RightInspectorPanelProps {
   state: SimulationState;
@@ -39,6 +41,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   source?: string;
+  protocols?: ProposedProtocol[];
 }
 
 const QUICK_ORGANS: AnatomyId[] = ["brain", "heart", "lungs", "pancreas"];
@@ -63,6 +66,7 @@ export function RightInspectorPanel({
   onFocusSuitComponent,
   onOpenMonitoringHud,
 }: RightInspectorPanelProps) {
+  const { crewId } = useSentinel();
   const selectedOrgan = getSelectedStructure(state);
   const selectedSuit = getSelectedSuitComponent(state);
   const [question, setQuestion] = useState("");
@@ -107,10 +111,11 @@ export function RightInspectorPanel({
           isolated: state.isolated,
           alerts: telemetrySnapshot.alerts,
           telemetrySummary,
+          crewId,
         }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { answer?: string; source?: string };
+      const data = (await res.json()) as { answer?: string; source?: string; protocols?: ProposedProtocol[] };
       setMessages((prev) => [
         ...prev,
         {
@@ -119,6 +124,7 @@ export function RightInspectorPanel({
             data.answer ||
             "No response returned. Try rephrasing your anatomy or suit question.",
           source: data.source,
+          protocols: Array.isArray(data.protocols) ? data.protocols : [],
         },
       ]);
     } catch {
@@ -541,6 +547,11 @@ export function RightInspectorPanel({
                 <div className="mt-1 text-[9px] font-mono uppercase tracking-wider text-slate-500">
                   Source: {msg.source}
                 </div>
+              )}
+              {msg.role === "assistant" && msg.protocols && msg.protocols.length > 0 && (
+                <SafeBoundary label="Protocols">
+                  <ProtocolList protocols={msg.protocols} />
+                </SafeBoundary>
               )}
             </div>
           ))}

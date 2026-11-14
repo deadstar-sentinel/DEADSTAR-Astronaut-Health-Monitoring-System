@@ -1,5 +1,5 @@
 import type { AnatomyId } from "../data/anatomyCatalog.ts";
-import { ORGAN_LINK, bandStyle, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
+import { ORGAN_LINK, RISK_SIGNAL, anatomyForRisk, bandStyle, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
 
 /** History (solid), forecast mean (dashed), 80/95 % bands, NOW rule and threshold — straight from /api/forecast. */
 const clean = (a: (number | null)[] | undefined): number[] => {
@@ -50,14 +50,27 @@ function ForecastChart({ f: raw, decimals }: { f: Forecast; decimals: number }) 
 }
 
 export function ForecastCard({ organId }: { organId: AnatomyId }) {
-  const { crewId, mission, meta, earthReplyMin } = useSentinel();
-  const link = ORGAN_LINK[organId];
+  const { crewId, mission, meta, earthReplyMin, focusRisk } = useSentinel();
+  const base = ORGAN_LINK[organId];
+  // An alert's "Show me" pins its exact risk (e.g. immune -> fever forecast) when it belongs to this structure.
+  const pinned = focusRisk && meta && anatomyForRisk(focusRisk, meta.risks) === organId ? focusRisk : null;
+  const organKey = pinned ? meta?.risks.find((r) => r.id === pinned)?.organ ?? base.organ : base.organ;
+  const link = pinned && RISK_SIGNAL[pinned] ? { organ: organKey, ...RISK_SIGNAL[pinned] } : base;
   const detail = useFetch<CrewDetail>(`/api/crew/${crewId}`);
   const fc = useFetch<Forecast>(`/api/forecast/${crewId}/${link.signal}?horizon=${link.horizon}`);
   const crew = mission?.crew.find((c) => c.id === crewId);
-  const organ = link.organ ? detail?.organs[link.organ] : undefined;
-  const riskId = meta?.risks.find((r) => r.organ === link.organ && r.name === organ?.risk)?.id;
-  const rec = riskId ? detail?.risks[riskId]?.recommendation : undefined;
+  const organEntry = organKey ? detail?.organs[organKey] : undefined;
+  const riskId = pinned ?? meta?.risks.find((r) => r.organ === organKey && r.name === organEntry?.risk)?.id;
+  const riskDetail = riskId ? detail?.risks[riskId] : undefined;
+  const organ = riskDetail
+    ? {
+        risk: meta?.risks.find((r) => r.id === riskId)?.name ?? organEntry?.risk ?? riskId ?? "",
+        score: riskDetail.score,
+        band: riskDetail.band ?? (riskDetail.score >= 60 ? "act" : riskDetail.score >= 30 ? "watch" : "nominal"),
+        driver: riskDetail.drivers[0] ?? organEntry?.driver ?? "",
+      }
+    : organEntry;
+  const rec = riskDetail?.recommendation;
   const sig = meta?.signals[link.signal];
   const alert = mission?.alerts.find((a) => a.crew === crewId && a.risk === riskId);
   const st = bandStyle(organ?.band);

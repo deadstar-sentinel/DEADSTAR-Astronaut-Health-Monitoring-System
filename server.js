@@ -108,6 +108,89 @@ app.get("/holo", (_req, res) => res.sendFile(path.join(STATIC, "holo.html")));
 app.get("/console", (_req, res) => res.sendFile(path.join(STATIC, "index.html")));
 app.get("/twin", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
 
+// ----------------------------------------------------------------------------- proposed protocols
+// Immediate action steps for the AI medical officer's answers, ranked by urgency, from the live engine:
+// active alerts (each names its onboard protocol), the light-cone decision, and the forecast behind it.
+const ANATOMY_TO_ORGAN = {
+  brain: ["brain", "head"], nervous: ["eyes", "head"], heart: ["heart"], circulatory: ["heart", "lymph"],
+  lungs: ["lungs"], liver: ["gut"], stomach: ["gut"], pancreas: ["gut"], small_intestine: ["gut"],
+  large_intestine: ["gut"], kidneys: ["body"], spine: ["spine"], skeletal: ["hips", "spine"], muscular: ["legs"],
+};
+const RISK_PROTOCOL = { immune: "infection", microbe: "infection", sleep: "fatigue", behavior: "fatigue",
+  systems: "fatigue", sans: "sans", bone: "bone", dynamic: "bone", hypoxia: "co2", cancer: "solar" };
+
+function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts }) {
+  const st = getState();
+  const organs = (selectedOrganId && ANATOMY_TO_ORGAN[selectedOrganId]) || [];
+  const riskOrgan = Object.fromEntries(HRP_RISKS.map((r) => [r.id, r.organ]));
+  const out = [];
+  const seen = new Set();
+  const ranked = [...st.alerts].sort((a, b) => {
+    const sev = (x) => (x.severity === "act" ? 0 : x.severity === "watch" ? 1 : 2);
+    const mine = (x) => (x.crew === crewId ? 0 : 1);
+    const here = (x) => (organs.includes(riskOrgan[x.risk]) ? 0 : 1);
+    return here(a) - here(b) || sev(a) - sev(b) || mine(a) - mine(b) || (a.act_within_min ?? 1e9) - (b.act_within_min ?? 1e9);
+  });
+  for (const al of ranked) {
+    const key = al.protocol || RISK_PROTOCOL[al.risk];
+    const proto = key && content.PROTOCOLS[key];
+    if (!proto || seen.has(`${al.crew}:${key}`)) continue;
+    seen.add(`${al.crew}:${key}`);
+    const crewName = al.crew && st.crew[al.crew] ? st.crew_summary(al.crew).name : "Whole crew";
+    const onboard = al.autonomous ?? (al.act_within_min != null && al.earth_reply_min != null && al.act_within_min < al.earth_reply_min);
+    out.push({
+      id: `${al.id}:${key}`,
+      title: proto.title,
+      crew: crewName,
+      severity: al.severity,
+      why: al.detail || al.title,
+      act_within_min: al.act_within_min ?? null,
+      earth_reply_min: al.earth_reply_min ?? null,
+      onboard: Boolean(onboard),
+      steps: proto.steps,
+      source: "SENTINEL engine alert + onboard protocol library",
+    });
+    if (out.length >= 3) break;
+  }
+  // No alert on the structure being discussed: offer the engine's preventive recommendation for its top risk.
+  if (crewId && st.crew[crewId] && organs.length && !out.some((p) => p.severity === "act")) {
+    const risks = st.risks[crewId];
+    const top = HRP_RISKS.filter((r) => organs.includes(r.organ) && risks[r.id])
+      .sort((a, b) => risks[b.id].score - risks[a.id].score)[0];
+    if (top && risks[top.id].recommendation) {
+      out.push({
+        id: `${crewId}:${top.id}:preventive`,
+        title: `${top.name}: preventive countermeasure`,
+        crew: st.crew_summary(crewId).name,
+        severity: analysis.band(risks[top.id].score),
+        why: `Risk score ${Math.round(risks[top.id].score)}/100 — ${(risks[top.id].drivers || [])[0] || "trend within expected range"}`,
+        act_within_min: null,
+        earth_reply_min: null,
+        onboard: false,
+        steps: [risks[top.id].recommendation, "SENTINEL keeps forecasting; escalate only if the 80 % band crosses the threshold."],
+        source: `NASA HRP risk: ${top.name}`,
+      });
+    }
+  }
+  if (suitActive) {
+    for (const a of (suitAlerts || []).filter((x) => x && x.severity === "critical").slice(0, 2)) {
+      out.unshift({
+        id: `suit:${a.id}`,
+        title: `EVA suit: ${a.title}`,
+        crew: "EVA crew member",
+        severity: "act",
+        why: [a.sensorReading, a.reason].filter(Boolean).join(" — "),
+        act_within_min: null,
+        earth_reply_min: null,
+        onboard: true,
+        steps: [a.recommendedAction, "Report suit status to IV crew; prepare for EVA termination if the reading persists."].filter(Boolean),
+        source: "Simulated suit telemetry",
+      });
+    }
+  }
+  return out.slice(0, 4);
+}
+
 app.post("/api/assistant", async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -122,7 +205,18 @@ app.post("/api/assistant", async (req, res, next) => {
       alerts: Array.isArray(body.alerts) ? body.alerts : [],
       telemetrySummary: typeof body.telemetrySummary === "string" ? body.telemetrySummary : "",
     });
-    res.json(result);
+    let protocols = [];
+    try {
+      protocols = proposeProtocols({
+        crewId: typeof body.crewId === "string" ? body.crewId : null,
+        selectedOrganId: body.selectedOrganId || null,
+        suitActive: Boolean(body.suitActive),
+        suitAlerts: Array.isArray(body.alerts) ? body.alerts : [],
+      });
+    } catch (err) {
+      console.error("proposeProtocols failed", err);
+    }
+    res.json({ ...result, protocols });
   } catch (e) {
     next(e);
   }
