@@ -272,13 +272,17 @@ function useModel(gltf, label) {
   buildParticles(); document.getElementById("src").textContent = `model: ${label}`;
 }
 const loader = new GLTFLoader();
-loader.load("/static/models/twin.glb", g => useModel(g, "twin.glb (Blender)"), undefined, () =>
+const fromFile = () => loader.load("/static/models/twin.glb", g => useModel(g, "twin.glb (Blender)"), undefined, () =>
   loader.load("/static/models/astronaut.glb", g => useModel(g, "astronaut.glb"), undefined, () => {
     const fig = fallbackFigure(); twin.add(fig); twin.updateMatrixWorld(true);
     fig.traverse(o => { if (o.isMesh && o.material === holo) bodyMeshes.push(o); });
     Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p))); buildParticles();
     document.getElementById("src").textContent = "model: built-in (run blender/build_twin.py for full anatomy)";
   }));
+if (window.TWIN_GLB_B64) {        // single-file preview: model embedded in the page
+  const bin = Uint8Array.from(atob(window.TWIN_GLB_B64), ch => ch.charCodeAt(0));
+  loader.parse(bin.buffer, "", g => useModel(g, "twin.glb (Blender)"), fromFile);
+} else fromFile();
 
 // ---------- particle skin: ~22k points sampled on the body; they ripple and glow where you touch ----------
 const pMat = new THREE.ShaderMaterial({
