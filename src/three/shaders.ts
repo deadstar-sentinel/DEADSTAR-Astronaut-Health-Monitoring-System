@@ -120,10 +120,12 @@ export function createHologramShellMaterial(): THREE.ShaderMaterial {
         if (uScanEnabled > 0.5) {
           float sweepY = mod(uTime * 0.42, 2.2) - 1.05;
           scanBand = exp(-pow((vWorldPos.y - sweepY) * 18.0, 2.0)) * 0.85;
-          fineLines = smoothstep(0.86, 1.0, sin(vWorldPos.y * 190.0 - uTime * 2.6)) * 0.16;
+          float lineArg = vWorldPos.y * 190.0 - uTime * 2.6;
+          float lineAA = 1.0 - smoothstep(0.6, 1.6, fwidth(lineArg)); // no sub-pixel shimmer
+          fineLines = smoothstep(0.86, 1.0, sin(lineArg)) * 0.16 * lineAA;
         }
 
-        float flicker = mix(1.0, 0.96 + 0.04 * sin(uTime * 31.0) * sin(uTime * 7.1), uFlickerEnabled);
+        float flicker = mix(1.0, 0.985 + 0.015 * sin(uTime * 1.2), uFlickerEnabled);
         float violetMix = smoothstep(0.35, 0.95, fresnel) * (0.42 + 0.2 * sin(vWorldPos.y * 3.0 + uTime));
         vec3 baseCol = mix(uPrimary, uSecondary, violetMix * 0.45);
         vec3 col = baseCol * (fresnel * 1.45 + scanBand + fineLines + 0.07) * uIntensity * flicker;

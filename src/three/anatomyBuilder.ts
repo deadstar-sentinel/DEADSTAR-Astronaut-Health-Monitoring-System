@@ -1070,12 +1070,14 @@ export async function loadAndBuildAnatomyTwin(
         attribute float aRand;
         varying float vGlow;
         void main() {
-          vec3 p = position + aNormal * (0.0015 * sin(uTime * 1.6 + aRand * 25.0));
+          vec3 p = position;
           float sweepY = mod(uTime * 0.42, 2.2) - 0.15;
           float sweep = exp(-pow((p.y - sweepY) * 18.0, 2.0));
-          vGlow = 0.28 + sweep * 0.85 + 0.14 * sin(uTime * 2.1 + aRand * 40.0);
+          vGlow = 0.26 + sweep * 0.85 + 0.08 * aRand;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          gl_PointSize = (1.35 + sweep * 1.5) * uPointScale / max(0.35, -mv.z);
+          float size = (1.35 + sweep * 1.5) * uPointScale / max(0.35, -mv.z);
+          vGlow *= clamp(size / 2.2, 0.35, 1.0);           // shrink brightness, not size, so points never drop below a pixel
+          gl_PointSize = max(size, 2.2);
           gl_Position = projectionMatrix * mv;
         }
       `,

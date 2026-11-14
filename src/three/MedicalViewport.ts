@@ -235,7 +235,12 @@ export class MedicalViewportController {
 
     // Post-processing on hardware GPU only
     if (!this.isSoftwareGl) {
-      this.composer = new EffectComposer(this.renderer);
+      const pr = this.renderer.getPixelRatio();
+      const rt = new THREE.WebGLRenderTarget(Math.max(1, width * pr), Math.max(1, height * pr), {
+        type: THREE.HalfFloatType,
+        samples: 4, // MSAA: without it every thin edge and fresnel rim crawls and sparkles under bloom
+      });
+      this.composer = new EffectComposer(this.renderer, rt);
       this.composer.addPass(new RenderPass(this.scene, this.camera));
       this.bloomPass = new UnrealBloomPass(new THREE.Vector2(width, height), 0.34, 0.45, 0.72);
       this.composer.addPass(this.bloomPass);
