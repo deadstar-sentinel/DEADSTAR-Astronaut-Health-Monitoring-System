@@ -169,6 +169,22 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
           <span className="px-1.5 py-0.5 border border-amber-400/50 text-[9px] font-mono tracking-wider text-amber-200">SYNTHETIC CREW</span>
           <button type="button" onClick={() => setModal("sources")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><BookOpen className="w-3.5 h-3.5" />Sources</button>
           <button type="button" onClick={() => setModal("qr")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><QrCode className="w-3.5 h-3.5" />Join</button>
+          <button
+            type="button"
+            title="Replay the cinematic intro"
+            onClick={() => {
+              try {
+                sessionStorage.removeItem("sentinel-entered");
+              } catch {
+                /* ignore */
+              }
+              window.location.hash = "";
+              window.location.reload();
+            }}
+            className="px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"
+          >
+            Intro
+          </button>
           <a href="/console" target="_blank" rel="noreferrer" className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300">Console<ExternalLink className="w-3 h-3" /></a>
         </div>
       </div>
