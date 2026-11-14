@@ -2,7 +2,14 @@ import type { AnatomyId } from "../data/anatomyCatalog.ts";
 import { ORGAN_LINK, bandStyle, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
 
 /** History (solid), forecast mean (dashed), 80/95 % bands, NOW rule and threshold — straight from /api/forecast. */
-function ForecastChart({ f, decimals }: { f: Forecast; decimals: number }) {
+const clean = (a: (number | null)[] | undefined): number[] => {
+  let last = 0;
+  return (a ?? []).map((v) => (typeof v === "number" && Number.isFinite(v) ? (last = v) : last));
+};
+
+function ForecastChart({ f: raw, decimals }: { f: Forecast; decimals: number }) {
+  const f = { ...raw, history: clean(raw.history), mean: clean(raw.mean), lo80: clean(raw.lo80), hi80: clean(raw.hi80), lo95: clean(raw.lo95), hi95: clean(raw.hi95) };
+  if (!f.history.length || !f.mean.length) return null;
   const W = 300;
   const H = 112;
   const P = { l: 34, r: 6, t: 8, b: 16 };

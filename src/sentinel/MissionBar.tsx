@@ -163,7 +163,9 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
           <Stat label="Earth link (one way)" value={mission.light.blackout ? "BLACKOUT" : owltMin != null ? `${owltMin.toFixed(1)} min` : "—"} warn={mission.light.blackout} />
           {co2 && <Stat label="Cabin CO₂" value={`${co2.now.toFixed(2)} ${co2.unit}`} warn={!!co2.normal && co2.now > co2.normal[1]} />}
           {dose != null && <Stat label={`${crew.name.split(" ").slice(-1)[0]} dose / limit`} value={`${Math.round(dose)} / 600 mSv`} warn={dose > 400} />}
-          {mission.space_weather.summary && <Stat label={`Space weather${mission.space_weather.live ? " (live)" : ""}`} value={mission.space_weather.summary.slice(0, 28)} />}
+          {mission.space_weather.summary?.label && (
+            <Stat label={`Space weather${mission.space_weather.live ? " · NOAA live" : ""}`} value={mission.space_weather.summary.label} warn={mission.space_weather.summary.level > 0} />
+          )}
           <span className="px-1.5 py-0.5 border border-amber-400/50 text-[9px] font-mono tracking-wider text-amber-200">SYNTHETIC CREW</span>
           <button type="button" onClick={() => setModal("sources")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><BookOpen className="w-3.5 h-3.5" />Sources</button>
           <button type="button" onClick={() => setModal("qr")} className="flex items-center gap-1 px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300"><QrCode className="w-3.5 h-3.5" />Join</button>

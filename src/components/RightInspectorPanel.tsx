@@ -18,6 +18,7 @@ import {
   type SimulationState,
 } from "../utils/simulationState.ts";
 import { ForecastCard } from "../sentinel/ForecastCard.tsx";
+import { SafeBoundary } from "../sentinel/SafeBoundary.tsx";
 
 interface RightInspectorPanelProps {
   state: SimulationState;
@@ -360,7 +361,9 @@ export function RightInspectorPanel({
               </button>
             </div>
 
-            <ForecastCard organId={selectedOrgan.id} />
+            <SafeBoundary label="Forecast">
+              <ForecastCard organId={selectedOrgan.id} />
+            </SafeBoundary>
 
             <div className="space-y-2.5 text-xs">
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">

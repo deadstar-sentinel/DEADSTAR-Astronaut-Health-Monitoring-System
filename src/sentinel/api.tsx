@@ -35,7 +35,7 @@ export interface MissionState {
   crew: CrewSummary[];
   alerts: Alert[];
   env: { co2?: { now: number; unit: string; normal?: [number, number] } };
-  space_weather: { summary?: string; live?: boolean };
+  space_weather: { summary?: { level: number; label: string; reasons?: string[] } | null; live?: boolean; goes?: number | null };
 }
 
 export interface OrganRisk { score: number; band: Band | string; risk: string; driver: string }

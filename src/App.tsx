@@ -40,6 +40,7 @@ import { BottomControlBar } from "./components/BottomControlBar.tsx";
 import { SpacesuitTelemetryModal } from "./components/SpacesuitTelemetryModal.tsx";
 import { SentinelProvider } from "./sentinel/api.tsx";
 import { MissionBar } from "./sentinel/MissionBar.tsx";
+import { SafeBoundary } from "./sentinel/SafeBoundary.tsx";
 
 export default function App() {
   const [state, setState] = useState<SimulationState>(() => createInitialSimulationState());
@@ -276,12 +277,14 @@ export default function App() {
         </div>
       </header>
 
-      <MissionBar
-        onOpenOrgan={(id) => {
-          handleSelectOrgan(id, true);
-          setRightOpen(true);
-        }}
-      />
+      <SafeBoundary label="Mission bar">
+        <MissionBar
+          onOpenOrgan={(id) => {
+            handleSelectOrgan(id, true);
+            setRightOpen(true);
+          }}
+        />
+      </SafeBoundary>
 
       {/* Main 3-Column Medical & Astronaut Spacesuit Simulation Workspace */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden">
