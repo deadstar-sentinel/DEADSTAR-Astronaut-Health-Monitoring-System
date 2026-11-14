@@ -28,7 +28,25 @@
   #card .sig{font-size:11px;color:#8A99A8;line-height:1.6}
   #card .act{margin-top:8px;padding:7px 8px;border:1px solid var(--lv);font-size:11px;line-height:1.45}
   #card .foot{margin-top:8px;font-size:9.5px;color:#56636F;letter-spacing:.06em}
-  .pyr #hud,.pyr #card,.pyr #title,.pyr .tag,.pyr .bar{display:none}
+  #ro-svg{position:fixed;inset:0;width:100%;height:100%;z-index:3;pointer-events:none}
+  .ro{position:fixed;z-index:4;width:186px;padding:7px 10px 8px;background:rgba(6,11,17,.6);border:1px solid #142030;
+    border-left:2px solid var(--c);font-size:10.5px;transition:opacity .5s;cursor:pointer;backdrop-filter:blur(3px)}
+  .ro.r{border-left:1px solid #142030;border-right:2px solid var(--c)}
+  .ro .h{display:flex;justify-content:space-between;font-size:9.5px;letter-spacing:.14em;color:#8A99A8}
+  .ro .h i{font-style:normal;color:var(--c)}
+  .ro .v{font:500 20px/1.25 "IBM Plex Mono",ui-monospace,monospace;color:#E6EDF3;font-variant-numeric:tabular-nums}
+  .ro .v small{font-size:10px;color:#8A99A8;margin-left:3px}
+  .ro .d{font-size:10px;color:var(--c)}
+  .ro .s{display:flex;justify-content:space-between;color:#8A99A8;font-size:10px;line-height:1.55}
+  .ro .s b{color:#C9D4DF;font-weight:400;font-variant-numeric:tabular-nums}
+  .ro canvas{display:block;width:100%;height:24px;margin:4px 0 2px}
+  body.dim .ro{opacity:.16} body.dim .ro.keep{opacity:1}
+  body.card-on .ro.r{opacity:0;pointer-events:none}
+  #strip{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:26px;z-index:4;font-size:9.5px;letter-spacing:.14em;color:#56636F;white-space:nowrap}
+  #strip div b{display:block;color:#E6EDF3;font-weight:500;font-size:13px;letter-spacing:.03em;margin-top:2px}
+  body.cinema #strip{top:calc(9vh + 12px)}
+  @media(max-width:820px){.ro,#ro-svg,#strip{display:none}}
+  .pyr #hud,.pyr #card,.pyr #title,.pyr .tag,.pyr .bar,.pyr .ro,.pyr #ro-svg,.pyr #strip{display:none}
   .pyr{background:#000}
 </style>
 <!-- Stage laptop (offline): vendor three@0.160.0 into /static/vendor and repoint this map. -->
@@ -42,6 +60,14 @@
 <div id="title">SENTINEL · DIGITAL TWIN · <span id="met">MET 150/04:12:00</span><b>FLIGHT ENGINEER MORI</b></div>
 <div id="hud">BODY TWIN · <b>MORI</b> · <span id="src">model: loading</span> · C: cinema · P: pyramid</div>
 <div id="card"></div>
+<svg id="ro-svg"></svg>
+<div id="strip">
+  <div>RADIATION TODAY<b id="st-dose">—</b></div>
+  <div>CAREER DOSE<b id="st-career">—</b></div>
+  <div>CABIN CO₂<b id="st-co2">—</b></div>
+  <div>EARTH ONE-WAY<b id="st-lt">—</b></div>
+  <div>DATA<b style="color:#F5B83D">SIMULATED</b></div>
+</div>
 <script type="module">
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -191,7 +217,7 @@ function addSpot(name, pos) {
   const lv = LEVEL[status[sys(name)] || "nom"], col = new THREE.Color(lv[0]);
   const core = new THREE.Mesh(new THREE.SphereGeometry(.012, 16, 12), new THREE.MeshBasicMaterial({ color: col }));
   const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: col, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-  halo.scale.setScalar(.09); core.add(halo); core.position.copy(pos); core.userData = { name, halo }; twin.add(core); spots.push(core);
+  halo.scale.setScalar(.09); core.add(halo); core.position.copy(pos); core.userData = { name, halo }; twin.add(core); spots.push(core); spotByName[name] = core;
   if (status[sys(name)] && status[sys(name)] !== "nom" && !name.endsWith("_R")) {
     const tag = document.createElement("div"); tag.className = "tag"; tag.style.color = lv[0];
     tag.textContent = `${sys(name).toUpperCase()} · ${lv[1]}`; document.body.appendChild(tag); core.userData.tag = tag;
@@ -284,13 +310,13 @@ cam.position.copy(camGoal);
 renderer.domElement.addEventListener("click", e => {
   ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), cam);
   const hit = ray.intersectObjects(spots, true)[0];      // halos make the targets easy to hit
-  if (!hit) { focus = null; card.classList.remove("on"); return; }
+  if (!hit) { focus = null; card.classList.remove("on"); document.body.classList.remove("card-on"); return; }
   const obj = hit.object.userData.name ? hit.object : hit.object.parent;
   const s = sys(obj.userData.name);
   focus = obj; showCard(s);
   dispatchEvent(new CustomEvent("sentinel:hotspot", { detail: s }));
 });
-addEventListener("keydown", e => { if (e.key === "Escape") { focus = null; card.classList.remove("on"); } });
+addEventListener("keydown", e => { if (e.key === "Escape") { focus = null; card.classList.remove("on"); document.body.classList.remove("card-on"); } });
 
 // Forecast chart: history solid, forecast dashed, 95 % band light, 80 % band darker, NOW rule, threshold dashed.
 function chartSVG(c, col) {
@@ -334,12 +360,112 @@ function showCard(s) {
     <div class="row"><span class="k">Light cone</span><span>${light[0]}<br><b style="color:${col};font-weight:500">${light[1]}</b></span></div>
     <div class="act">${d.act}</div>
     <div class="foot">SIMULATED CREW · DEMO VALUES · DECISION SUPPORT, NOT DIAGNOSIS · ESC TO CLOSE</div>`;
-  card.classList.add("on");
+  card.classList.add("on"); document.body.classList.add("card-on");
 }
 window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) {
   m.material.color.set(LEVEL[l][0]); m.userData.halo.material.color.set(LEVEL[l][0]); } }); } };
 
+// ---------- live readouts around the body (SIMULATED crew values, labelled on screen) ----------
+const live = { hr: 67, hrv: 41, sbp: 118, dbp: 76, temp: 37.46, spo2: 97.4, resp: 17, alert: 83.2, rt: 326,
+  onsd: 5.71, glu: 104, mass: 71.2 };
+const DOSE_PER_DAY = 1.84;   // mSv/day, Curiosity MSL/RAD cruise (Zeitlin et al. 2013)
+const RO = [   // anchor hotspot, side, rows
+  { sys: "brain", at: "HS_brain", side: "l", y: .15, spark: "alert",
+    main: () => [live.alert.toFixed(1), "% ALERTNESS"], d: () => `${(live.alert - 100).toFixed(1)} vs baseline`,
+    rows: () => [["Sleep debt", "3.4 h"], ["Reaction time", `${Math.round(live.rt)} ms`]] },
+  { sys: "eyes", at: "HS_eyes_L", side: "l", y: .32,
+    main: () => [live.onsd.toFixed(2), "mm ONSD"], d: () => "+0.31 mm since launch",
+    rows: () => [["Near vision", "−0.25 D"], ["Last eye scan", "Day 147"]] },
+  { sys: "lymph", at: "HS_lymph", side: "l", y: .46, spark: "temp",
+    main: () => [live.temp.toFixed(2), "°C CORE"], d: () => `+${(live.temp - 37.08).toFixed(2)} °C vs baseline`,
+    rows: () => [["Fever threshold", "38.00 °C"]] },
+  { sys: "lungs", at: "HS_lungs_L", side: "l", y: .61, spark: "spo2",
+    main: () => [live.spo2.toFixed(1), "% SpO₂"], d: () => "within baseline",
+    rows: () => [["Respiration", `${Math.round(live.resp)} /min`], ["Cabin CO₂", "2.3 mmHg"]] },
+  { sys: "gut", at: "HS_gut", side: "l", y: .76,
+    main: () => [Math.round(live.glu), "mg/dL GLUCOSE"], d: () => "fasting, in range",
+    rows: () => [["Body mass", `${live.mass.toFixed(1)} kg (−0.8 %)`], ["Intake", "96 % of plan"]] },
+  { sys: "heart", at: "HS_heart", side: "r", y: .15, ecg: true,
+    main: () => [Math.round(live.hr), "BPM"], d: () => `+${(live.hr - 59).toFixed(0)} bpm vs baseline`,
+    rows: () => [["HRV (RMSSD)", `${Math.round(live.hrv)} ms (−18 %)`], ["Blood pressure", `${Math.round(live.sbp)}/${Math.round(live.dbp)}`]] },
+  { sys: "spine", at: "HS_spine", side: "r", y: .37,
+    main: () => ["1", "/10 BACK PAIN"], d: () => "no change",
+    rows: () => [["Spinal height", "+1.9 cm vs Earth"]] },
+  { sys: "hip", at: "HS_hip_R", side: "r", y: .53,
+    main: () => ["−6.2", "% HIP BMD"], d: () => "−1.27 %/month",
+    rows: () => [["Projected at mission end", "−10.6 %"], ["NASA prior", "1–1.5 %/month"]] },
+  { sys: "leg", at: "HS_leg_R", side: "r", y: .7,
+    main: () => ["−3.9", "% LEG STRENGTH"], d: () => "since launch",
+    rows: () => [["Exercise done", "86 % of plan"], ["VO₂max", "−4.6 %"]] },
+];
+const spotByName = {}, roSvg = document.getElementById("ro-svg"), hist = { alert: [], temp: [], spo2: [] }, ecgBuf = new Float32Array(160);
+let ecgPhase = 0;
+RO.forEach(r => {
+  const el = document.createElement("div"), c = LEVEL[status[r.sys] || "nom"][0];
+  el.className = "ro" + (r.side === "r" ? " r" : ""); el.style.setProperty("--c", c);
+  el.innerHTML = `<div class="h"><span>${r.sys.toUpperCase()}</span><i>${LEVEL[status[r.sys] || "nom"][1]}</i></div>
+    <div class="v"></div><div class="d"></div>${r.spark || r.ecg ? "<canvas></canvas>" : ""}<div class="rows"></div>`;
+  el.addEventListener("click", ev => { ev.stopPropagation(); focus = spotByName[r.at] || null; showCard(r.sys); });
+  document.body.appendChild(el); r.el = el; r.cv = el.querySelector("canvas");
+  r.line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+  r.dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  [r.line, r.dot].forEach(n => { n.setAttribute("stroke", c); roSvg.appendChild(n); });
+  r.line.setAttribute("fill", "none"); r.line.setAttribute("stroke-width", "1"); r.line.setAttribute("opacity", ".75");
+  r.dot.setAttribute("r", "2.5"); r.dot.setAttribute("fill", c);
+});
+function ecgWave(p) { const g = (c, w, a) => a * Math.exp(-((p - c) ** 2) / (2 * w * w));
+  return g(.1, .025, .12) + g(.2, .008, -.12) + g(.22, .01, 1) + g(.245, .01, -.25) + g(.45, .045, .3); }
+function drawTrace(cv, data, color, lo, hi) {
+  const w = cv.clientWidth, h = cv.clientHeight, dpr = Math.min(devicePixelRatio, 2);
+  if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
+  const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, w, h);
+  x.strokeStyle = color; x.lineWidth = 1.2; x.shadowColor = color; x.shadowBlur = 6; x.beginPath();
+  for (let i = 0; i < data.length; i++) { const X = i / (data.length - 1) * w, Y = h - 2 - (data[i] - lo) / (hi - lo) * (h - 4); i ? x.lineTo(X, Y) : x.moveTo(X, Y); }
+  x.stroke();
+}
+let lastTick = 0;
+function updateReadouts(t, dt) {
+  if (innerWidth <= 820) return;
+  if (t - lastTick > .25) {      // 4 Hz telemetry
+    lastTick = t; const n = () => Math.random() - .5;
+    live.hr += (67 - live.hr) * .1 + n() * 1.2; live.hrv += (41 - live.hrv) * .1 + n() * 1.4;
+    live.sbp += (118 - live.sbp) * .1 + n(); live.dbp += (76 - live.dbp) * .1 + n() * .6;
+    live.temp += (37.46 - live.temp) * .08 + n() * .012; live.spo2 += (97.4 - live.spo2) * .1 + n() * .15;
+    live.resp += (17 - live.resp) * .1 + n() * .5; live.alert += (83.2 - live.alert) * .1 + n() * .5;
+    live.rt += (326 - live.rt) * .1 + n() * 6; live.glu += (104 - live.glu) * .05 + n() * .8;
+    for (const [k, a] of Object.entries(hist)) { a.push(live[k]); if (a.length > 90) a.shift(); }
+    RO.forEach(r => { const [v, u] = r.main(); r.el.querySelector(".v").innerHTML = `${v}<small>${u}</small>`;
+      r.el.querySelector(".d").textContent = r.d();
+      r.el.querySelector(".rows").innerHTML = r.rows().map(([k, v]) => `<div class="s"><span>${k}</span><b>${v}</b></div>`).join(""); });
+    const day = (150 * 86400 + 4 * 3600 + 12 * 60 + t) / 86400;
+    document.getElementById("st-dose").textContent = `${(DOSE_PER_DAY * (day % 1)).toFixed(3)} mSv`;
+    document.getElementById("st-career").textContent = `${(DOSE_PER_DAY * day).toFixed(0)} / 600 mSv`;
+    document.getElementById("st-co2").textContent = "2.3 mmHg";
+    document.getElementById("st-lt").textContent = `${Math.floor(oneWayS / 60)} min ${String(Math.round(oneWayS % 60)).padStart(2, "0")} s`;
+  }
+  const n = Math.max(1, Math.round(dt * 110));
+  for (let i = 0; i < n; i++) { ecgPhase = (ecgPhase + live.hr / 60 / 110) % 1; ecgBuf.copyWithin(0, 1); ecgBuf[ecgBuf.length - 1] = ecgWave(ecgPhase); }
+  const W = innerWidth, H = innerHeight;
+  RO.forEach(r => {
+    const c = LEVEL[status[r.sys] || "nom"][0], bw = 186, top = H * r.y, left = r.side === "l" ? W * .03 : W * .97 - bw;
+    r.el.style.left = `${left}px`; r.el.style.top = `${top}px`;
+    r.el.classList.toggle("keep", !!focus && focus === spotByName[r.at]);
+    if (r.ecg) drawTrace(r.cv, ecgBuf, c, -.3, 1.05);
+    else if (r.spark) { const a = hist[r.spark]; if (a.length > 2) drawTrace(r.cv, a, c, Math.min(...a) - .05, Math.max(...a) + .05); }
+    const sp = spotByName[r.at];
+    if (!sp) return;
+    sp.getWorldPosition(v); v.project(cam);
+    const sx = (v.x * .5 + .5) * W, sy = (-v.y * .5 + .5) * H, ay = top + 16;
+    const ex = r.side === "l" ? left + bw + 1 : left - 1, mx = r.side === "l" ? ex + 28 : ex - 28;
+    const vis = !(focus && focus !== sp) && !(document.body.classList.contains("card-on") && r.side === "r");
+    r.line.setAttribute("points", `${sx},${sy} ${mx},${ay} ${ex},${ay}`);
+    r.dot.setAttribute("cx", sx); r.dot.setAttribute("cy", sy);
+    r.line.style.opacity = r.dot.style.opacity = vis ? "" : "0";
+  });
+}
+
 // ---------- loop ----------
+let prevT = 0;
 const clock = new THREE.Clock(), v = new THREE.Vector3(), metEl = document.getElementById("met"), pad = n => String(Math.floor(n)).padStart(2, "0");
 renderer.setAnimationLoop(() => {
   const t = clock.getElapsedTime();
@@ -369,9 +495,11 @@ renderer.setAnimationLoop(() => {
   else { camGoal.set(Math.sin(a) * r, .12 + .28 * Math.sin(orbitT * .05), Math.cos(a) * r); lookGoal.set(0, .02, 0); }
   cam.position.lerp(camGoal, .045); look.lerp(lookGoal, .06); cam.lookAt(look);
   composer.render();
+  document.body.classList.toggle("dim", !!focus);
+  updateReadouts(t, t - (prevT || t)); prevT = t;
   spots.forEach(m => { const tag = m.userData.tag; if (!tag) return;
     m.getWorldPosition(v); v.project(cam);
-    const hidden = v.z > 1; tag.style.display = hidden ? "none" : "block";
+    const hidden = v.z > 1 || innerWidth > 820; tag.style.display = hidden ? "none" : "block";
     tag.style.left = `${(v.x * .5 + .5) * innerWidth}px`; tag.style.top = `${(-v.y * .5 + .5) * innerHeight}px`; });
 });
 </script>
