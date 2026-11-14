@@ -38,6 +38,8 @@ import { LeftControlPanel } from "./components/LeftControlPanel.tsx";
 import { RightInspectorPanel } from "./components/RightInspectorPanel.tsx";
 import { BottomControlBar } from "./components/BottomControlBar.tsx";
 import { SpacesuitTelemetryModal } from "./components/SpacesuitTelemetryModal.tsx";
+import { SentinelProvider } from "./sentinel/api.tsx";
+import { MissionBar } from "./sentinel/MissionBar.tsx";
 
 export default function App() {
   const [state, setState] = useState<SimulationState>(() => createInitialSimulationState());
@@ -210,6 +212,7 @@ export default function App() {
   }, []);
 
   return (
+    <SentinelProvider>
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#030915] text-[#E6F1FF]">
       {/* Top Workstation Header Bar */}
       <header className="h-11 shrink-0 bg-[#051020] border-b border-cyan-500/20 px-3 flex items-center justify-between gap-3 z-40">
@@ -272,6 +275,13 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <MissionBar
+        onOpenOrgan={(id) => {
+          handleSelectOrgan(id, true);
+          setRightOpen(true);
+        }}
+      />
 
       {/* Main 3-Column Medical & Astronaut Spacesuit Simulation Workspace */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden">
@@ -341,5 +351,6 @@ export default function App() {
         onAskAiAlert={handleAskAiAlert}
       />
     </div>
+    </SentinelProvider>
   );
 }

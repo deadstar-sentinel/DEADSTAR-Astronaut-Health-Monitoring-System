@@ -104,6 +104,8 @@ app.get("/", (_req, res) => {
 });
 app.get(["/crew", "/astronaut"], (_req, res) => res.sendFile(path.join(STATIC, "astronaut.html")));
 app.get("/holo", (_req, res) => res.sendFile(path.join(STATIC, "holo.html")));
+// Original SENTINEL mission console (ECG, risk matrix, scorecard, PVT guests), linked from the app.
+app.get("/console", (_req, res) => res.sendFile(path.join(STATIC, "index.html")));
 app.get("/twin", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
 
 app.post("/api/assistant", async (req, res, next) => {

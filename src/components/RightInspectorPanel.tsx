@@ -17,6 +17,7 @@ import {
   getSelectedSuitComponent,
   type SimulationState,
 } from "../utils/simulationState.ts";
+import { ForecastCard } from "../sentinel/ForecastCard.tsx";
 
 interface RightInspectorPanelProps {
   state: SimulationState;
@@ -358,6 +359,8 @@ export function RightInspectorPanel({
                 Zoom Focus
               </button>
             </div>
+
+            <ForecastCard organId={selectedOrgan.id} />
 
             <div className="space-y-2.5 text-xs">
               <div className="p-2.5 bg-[#040c18] border border-cyan-500/15">
