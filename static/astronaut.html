@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#05080d">
+<title>SENTINEL — Astronaut</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%235ce1e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%235ce1e6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/css/app.css">
+<script type="importmap">{"imports":{"three":"/static/vendor/three.module.min.js","three/addons/":"/static/vendor/addons/"}}</script>
+<style>
+  body { background: var(--bg); }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 0 40px; }
+  .a-top { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(5,8,13,.94); backdrop-filter: blur(8px); z-index: 10; }
+  .a-brand { font: 600 12px/1 var(--sans); letter-spacing: .2em; }
+  .a-brand small { display: block; font: 500 9px/1 var(--mono); letter-spacing: .16em; color: var(--ink-3); margin-top: 4px; }
+  .who { display: flex; gap: 6px; }
+  .who button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--panel); font: 600 11px/1 var(--mono); color: var(--ink-2); cursor: pointer; }
+  .who button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .hello { padding: 18px 16px 4px; }
+  .hello h1 { margin: 0; font: 600 22px/1.2 var(--sans); }
+  .hello p { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; }
+  .card { margin: 12px 16px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 15px; }
+  .wx-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .wx-big { font: 500 46px/1 var(--mono); letter-spacing: -.03em; }
+  .wx-big small { font-size: 18px; color: var(--ink-3); }
+  .wx-line { font: 600 15px/1.35 var(--sans); margin-top: 6px; }
+  .wx-list { margin-top: 12px; }
+  .wx-item { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px dashed var(--line); font-size: 13px; }
+  .wx-item .ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 11px/1 var(--mono); }
+  .wx-item .ic.nominal { background: var(--nominal-bg); color: #9cc6f5; } .wx-item .ic.watch { background: var(--watch-bg); color: #f0b660; } .wx-item .ic.act { background: var(--act-bg); color: #f19ae0; }
+  .wx-item .r { font: 500 12px/1 var(--mono); color: var(--ink-2); }
+  .body-wrap { position: relative; height: 380px; margin: 12px 16px 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: radial-gradient(ellipse at 50% 85%, #0b1c24 0%, #070c12 55%, var(--bg) 100%); }
+  .body-wrap canvas { width: 100%; height: 100%; display: block; }
+  .body-hint { position: absolute; left: 12px; top: 10px; font: 600 12px/1.3 var(--sans); }
+  .body-hint span { display: block; font: 400 11px/1.4 var(--sans); color: var(--ink-3); }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 78vh; background: #0b1118; border-top: 1px solid var(--line-2); border-radius: 14px 14px 0 0; transform: translateY(calc(100% + 60px)); visibility: hidden; transition: transform .25s ease, visibility 0s .25s; z-index: 30; overflow-y: auto; box-shadow: 0 -20px 60px rgba(0,0,0,.6); }
+  .sheet.open { transform: none; visibility: visible; transition: transform .25s ease; }
+  .sheet-in { max-width: 520px; margin: 0 auto; padding: 10px 18px 28px; }
+  .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-2); margin: 4px auto 12px; }
+  .task { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px dashed var(--line); }
+  .task:first-of-type { border-top: 0; }
+  .task .t { font: 600 13px/1.3 var(--sans); }
+  .task .s { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .task input[type=number] { width: 86px; height: 32px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 8px; font-family: var(--mono); }
+  .done-tag { font: 600 10px/1 var(--mono); color: var(--accent); letter-spacing: .1em; }
+  .streak { display: flex; gap: 4px; margin-top: 8px; }
+  .streak span { flex: 1; height: 6px; border-radius: 3px; background: var(--line-2); }
+  .streak span.on { background: var(--accent); }
+  .mood { width: 100%; accent-color: var(--accent); }
+  .steps li { font-size: 13px; }
+  h2.sec { margin: 22px 16px 0; font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+  .earth { display: flex; justify-content: space-between; align-items: center; }
+  .earth .v { font: 500 20px/1 var(--mono); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="a-top">
+    <div class="a-brand">SENTINEL<small>ASTRONAUT · <span id="mis">—</span></small></div>
+    <div class="who" id="who"></div>
+  </div>
+  <div class="hello"><h1 id="hello">—</h1><p id="helloSub">—</p></div>
+
+  <div class="card" id="weather">
+    <div class="lbl">Your health forecast</div>
+    <div class="wx-head"><div><div class="wx-big" id="wxBig">—</div><div class="wx-line" id="wxLine">—</div></div></div>
+    <div class="wx-list" id="wxList"></div>
+  </div>
+
+  <div class="body-wrap">
+    <canvas id="holo"></canvas>
+    <div class="body-hint">Tap where it hurts<span>or any body area to see what matters there</span></div>
+  </div>
+
+  <h2 class="sec">What to do now</h2>
+  <div class="card" id="todo"></div>
+
+  <h2 class="sec">Today's measurements</h2>
+  <div class="card" id="tasks"></div>
+
+  <h2 class="sec">Earth link</h2>
+  <div class="card earth"><div><div class="lbl">Message to Houston arrives in</div><div class="muted" style="font-size:12px;margin-top:4px" id="earthSub">—</div></div><div class="v" id="earthV">—</div></div>
+  <div class="dim" style="font-size:11px;padding:14px 16px">Decision support, not a medical device. Synthetic crew data calibrated to NASA-published rates.</div>
+</div>
+
+<div class="sheet" id="sheet"><div class="sheet-in"><div class="grab"></div><div id="sheetBody"></div></div></div>
+<div class="modal-back" id="modal"><div class="modal"><div class="modal-head"><h3 id="modalTitle">—</h3><button class="btn sm ghost iconbtn" id="modalClose" aria-label="Close">✕</button></div><div class="modal-body" id="modalBody"></div></div></div>
+<div class="toast" id="toast"></div>
+<div class="tip" id="tip"></div>
+
+<script type="module">
+import { createHologram } from "/static/js/hologram.js";
+import { openPVT } from "/static/js/pvt.js";
+import { speak } from "/static/js/voice.js";
+import { fmt } from "/static/js/charts.js";
+const $ = s => document.querySelector(s);
+const api = async p => { const r = await fetch(p); if (!r.ok) throw new Error(r.status); return r.json(); };
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const toast = m => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2800); };
+const params = new URLSearchParams(location.search);
+let meta, st, cid = params.get("crew") || localStorage.getItem("sentinel.crew") || "mori", det, holo;
+
+function openModal(t, h) { $("#modalTitle").textContent = t; $("#modalBody").innerHTML = h; $("#modal").classList.add("open"); }
+function closeModal() { $("#modal").classList.remove("open"); }
+$("#modalClose").onclick = closeModal;
+$("#sheet").onclick = e => { if (e.target.classList.contains("grab")) $("#sheet").classList.remove("open"); };
+
+async function load() {
+  meta = meta || await api("/api/meta");
+  st = await api("/api/state");
+  det = await api(`/api/crew/${cid}`);
+  const tf = await api(`/api/forecast/${cid}/temp?horizon=24h`);
+  render(tf);
+}
+
+function render(tf) {
+  const s = det.summary, first = s.name.split(" ")[0];
+  $("#mis").textContent = st.mission.short;
+  $("#who").innerHTML = st.crew.map(c => `<button class="${c.id === cid ? "on" : ""}" data-c="${c.id}" title="${esc(c.name)}">${c.short}</button>`).join("");
+  $("#who").onclick = e => { const b = e.target.closest("button"); if (!b) return; cid = b.dataset.c; localStorage.setItem("sentinel.crew", cid); load(); };
+  const hr = new Date().getUTCHours();
+  $("#hello").textContent = `${hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening"}, ${first}.`;
+  $("#helloSub").textContent = `${st.mission.name} · day ${st.met.day}. ${st.light.owlt_s >= 60 ? "Earth is " + Math.round(st.light.owlt_s / 60) + " light-minutes away" : "Earth is close"} — SENTINEL is your onboard doctor's assistant.`;
+
+  // health weather
+  const p = tf.threshold.peak_prob;
+  const items = [];
+  const myAlerts = st.alerts.filter(a => a.crew === cid);
+  const fever = myAlerts.find(a => a.risk === "immune");
+  let big, line;
+  if (fever || p >= 0.2) { big = `${Math.round(p * 100)}<small>%</small>`; line = `chance of fever (38 °C or more) in the next 24 hours`; }
+  else {
+    const top = s.top_risks[0]; const rn = meta.risks.find(r => r.id === top.id).name;
+    big = `${Math.round(s.health_index)}<small>/100</small>`; line = top.band === "nominal" ? "Health index — all clear today" : `Health index — keep an eye on ${rn.toLowerCase()}`;
+  }
+  $("#wxBig").innerHTML = big; $("#wxLine").textContent = line;
+  const t = s.task;
+  const tb = t.task_relative >= 78 ? "nominal" : t.task_relative >= 70 ? "watch" : "act";
+  items.push([tb, tb === "nominal" ? "✓" : "!", `Ready for tomorrow's 09:00 task`, `${Math.round(t.task_relative)}% sharp`]);
+  items.push([s.daily.sleep_h < 6 ? "watch" : "nominal", "z", `Sleep last night`, `${fmt(s.daily.sleep_h, 1)} h`]);
+  const sv = st.ship_vs_body;
+  items.push([sv.co2_1h > 3 ? "act" : "nominal", sv.co2_1h > 3 ? "!" : "✓", sv.co2_1h > 3 ? "Cabin air: CO₂ high — it's the ship, not you" : "Cabin air is fine", `${fmt(sv.co2_1h, 1)} mmHg`]);
+  items.push([sv.rad_ratio > 5 ? "act" : "nominal", sv.rad_ratio > 5 ? "!" : "✓", sv.rad_ratio > 5 ? "Radiation storm — go to the shelter now" : "No radiation storm", `${fmt(sv.rad_now, 0)} µSv/h`]);
+  const eyes = det.risks.sans, bone = det.risks.bone;
+  if (eyes.band !== "nominal") items.push([eyes.band, "◉", "Your eyes need a check this week", `SANS ${Math.round(eyes.score)}`]);
+  if (bone.band !== "nominal") items.push([bone.band, "▲", "Bone loss a bit faster than planned", `${fmt(s.daily.bmd, 1)}%`]);
+  $("#wxList").innerHTML = items.map(([b, ic, txt, r]) => `<div class="wx-item"><span class="ic ${b}">${ic}</span><span>${esc(txt)}</span><span class="r">${esc(r)}</span></div>`).join("");
+
+  // hologram
+  if (!holo) holo = createHologram($("#holo"), { onRegion: openRegion, autoRotate: true, modelAvailable: meta.model_glb });
+  holo.setOrgans(det.organs); holo.setHeartRate(s.vitals.hr);
+
+  // what to do now
+  const a = myAlerts[0] || st.alerts.find(x => !x.crew);
+  if (a && meta.protocols[a.protocol]) {
+    const pr = meta.protocols[a.protocol];
+    $("#todo").innerHTML = `<div class="lbl">${esc(a.title)}</div><div class="muted" style="font-size:12.5px;margin:6px 0 4px">${a.autonomous ? "Earth's answer would arrive too late, so these steps are for you and your medical officer now." : "No rush — your flight surgeon will also review this."}</div>
+      <ol class="steps">${pr.steps.map((x, i) => `<li><input type="checkbox"><span>${esc(x)}</span></li>`).join("")}</ol>
+      <button class="btn sm" id="readTodo" style="margin-top:10px">Read it to me</button>`;
+    $("#readTodo").onclick = () => speak(`${a.title}. ${pr.steps.join(". ")}`);
+    document.querySelectorAll("#todo input").forEach(i => i.onchange = () => i.closest("li").classList.toggle("done", i.checked));
+  } else $("#todo").innerHTML = `<div class="muted">Nothing needs doing. Keep your routine.</div>`;
+
+  // tasks
+  const key = `sentinel.done.${cid}.${new Date().toISOString().slice(0, 10)}`;
+  const done = JSON.parse(localStorage.getItem(key) || "{}");
+  const row = (id, title, sub, ctrl) => `<div class="task"><div><div class="t">${title}</div><div class="s">${sub}</div></div><div>${done[id] ? `<span class="done-tag">DONE ✓</span>` : ctrl}</div></div>`;
+  $("#tasks").innerHTML =
+    row("bp", "Morning blood pressure", `Wearable estimate ${fmt(s.vitals.sbp, 0)}/${fmt(s.vitals.dbp, 0)} mmHg — confirm with the cuff`, `<button class="btn sm" data-done="bp">Confirm</button>`) +
+    row("glucose", "Blood sugar before breakfast", `Last ${fmt(s.daily.glucose, 0)} mg/dL. Normal fasting is 70–100.`, `<input type="number" inputmode="decimal" id="glu" placeholder="mg/dL"> <button class="btn sm primary" data-log="glucose">Log</button>`) +
+    row("mood", "How do you feel today?", `<input type="range" class="mood" id="moodV" min="0" max="100" value="${Math.round(s.daily.mood)}">`, `<button class="btn sm primary" data-log="mood">Save</button>`) +
+    row("pvt", "Reaction test", `30 seconds. Last median ${fmt(s.daily.pvt, 0)} ms.`, `<button class="btn sm primary" id="pvtGo">Start</button>`) +
+    row("sleep", "Sleep", `Measured by your wrist sensor: ${fmt(s.daily.sleep_h, 1)} h`, `<span class="done-tag">AUTO ✓</span>`) +
+    `<div class="lbl" style="margin-top:12px">7-day measurement streak</div><div class="streak">${Array.from({ length: 7 }, (_, i) => `<span class="${i < 6 || Object.keys(done).length >= 3 ? "on" : ""}"></span>`).join("")}</div>`;
+  $("#tasks").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.done) { done[b.dataset.done] = 1; localStorage.setItem(key, JSON.stringify(done)); render(tf); }
+    if (b.dataset.log) {
+      const sig = b.dataset.log; const val = sig === "glucose" ? $("#glu").value : $("#moodV").value;
+      if (!val) return toast("Enter a value first");
+      const r = await fetch("/api/log", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ crew: cid, signal: sig, value: +val }) });
+      if (r.ok) { done[sig] = 1; localStorage.setItem(key, JSON.stringify(done)); toast("Saved. Your forecast is updating."); load(); }
+    }
+    if (b.id === "pvtGo") openPVT({ modal: openModal, close: closeModal, crew: cid, onDone: () => { done.pvt = 1; localStorage.setItem(key, JSON.stringify(done)); load(); } });
+  };
+
+  // earth
+  const ow = st.light.owlt_s;
+  $("#earthV").textContent = ow >= 60 ? `${Math.floor(ow / 60)}m ${String(Math.round(ow % 60)).padStart(2, "0")}s` : `${ow.toFixed(1)} s`;
+  $("#earthSub").textContent = `A reply takes at least ${Math.round(2 * ow / 60)} min plus the ground team's time.`;
+}
+
+function openRegion(k) {
+  const R = meta.regions[k]; if (!R) return;
+  const s = det.summary;
+  const val = sig => { const m = meta.signals[sig]; if (sig === "co2") return `${fmt(st.env.co2.now, 1)} mmHg`; const v = s.vitals[sig] ?? s.daily[sig]; return v === undefined ? "" : `${fmt(v, m?.decimals ?? 1)} ${m?.unit || ""}`; };
+  const risks = R.risks.map(r => det.risks[r]).filter(Boolean);
+  const worst = risks.reduce((a, b) => (b.score > a.score ? b : a), risks[0] || { score: 0, band: "nominal" });
+  $("#sheetBody").innerHTML = `<div class="lbl">${esc(R.label)}</div>
+    <div style="font:600 18px/1.3 var(--sans);margin:4px 0 8px">${worst.band === "act" ? "This needs attention today." : worst.band === "watch" ? "Worth keeping an eye on." : "Looks normal for you."}</div>
+    ${risks.length ? `<div class="muted" style="font-size:12.5px">${esc(worst.drivers.join(". "))}.</div><div class="muted" style="font-size:12.5px;margin-top:6px"><b style="color:var(--ink)">What helps:</b> ${esc(worst.recommendation)}.</div>` : ""}
+    ${R.exam ? `<button class="btn primary" style="margin-top:12px" id="examGo">Start guided self-exam</button>` : ""}
+    ${R.indicators.map(sig => { const I = meta.indicators[sig]; if (!I) return ""; return `<div class="ind-head"><span class="n">${esc(I.name)}</span><span class="v">${val(sig)}</span></div>
+      <div class="qa"><div class="q">Why it matters</div><div class="a">${esc(I.why)}</div></div>
+      <div class="qa"><div class="q">What space does to it</div><div class="a">${esc(I.hazards)}</div></div>
+      <div class="qa"><div class="q">When to act</div><div class="a">${esc(I.act)}</div></div>
+      <div class="qa"><div class="q">How to prevent problems</div><div class="a">${esc(I.prevent)}</div></div>`; }).join("")}
+    <button class="btn" style="margin-top:14px;width:100%;justify-content:center" onclick="document.getElementById('sheet').classList.remove('open')">Close</button>`;
+  if (R.exam) document.getElementById("examGo").onclick = () => exam(R.exam);
+  $("#sheet").classList.add("open");
+}
+
+function exam(key) {
+  const ex = meta.exams[key]; let i = 0;
+  const draw = () => {
+    openModal(ex.title, `<div class="exam-prog">${ex.steps.map((_, j) => `<span class="${j <= i ? "on" : ""}"></span>`).join("")}</div><div class="lbl">Step ${i + 1} of ${ex.steps.length}</div><div class="exam-step">${esc(ex.steps[i].say)}</div><div style="display:flex;justify-content:space-between;margin-top:14px"><button class="btn" id="b">Back</button><button class="btn primary" id="n">${i === ex.steps.length - 1 ? "Finish" : "Next"}</button></div>`);
+    speak(ex.steps[i].say);
+    document.getElementById("b").onclick = () => { i = Math.max(0, i - 1); draw(); };
+    document.getElementById("n").onclick = () => { if (i === ex.steps.length - 1) { closeModal(); toast("Exam saved."); } else { i++; draw(); } };
+  };
+  $("#sheet").classList.remove("open"); draw();
+}
+
+load().catch(e => toast("Could not load: " + e.message));
+setInterval(load, 60000);
+</script>
+</body>
+</html>

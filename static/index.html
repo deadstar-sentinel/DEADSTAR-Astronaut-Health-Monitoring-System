@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEADSTAR SENTINEL — Flight Surgeon Console</title>
+<meta name="description" content="Predictive digital twin and autonomous medical officer for astronauts beyond real-time reach of Earth.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%235ce1e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%235ce1e6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/css/app.css">
+<script type="importmap">{"imports":{"three":"/static/vendor/three.module.min.js","three/addons/":"/static/vendor/addons/"}}</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="12.5" fill="none" stroke="#5ce1e6" stroke-width="1.4" stroke-dasharray="58 8 6 6"/>
+      <circle cx="16" cy="16" r="6" fill="none" stroke="#5ce1e6" stroke-width="1" opacity=".55"/>
+      <circle cx="16" cy="16" r="2.2" fill="#e6edf3"/>
+    </svg>
+    <div class="brand-name">DEADSTAR<small>SENTINEL · v1.0</small></div>
+  </div>
+  <div><div class="seg" id="missionSeg" role="tablist" aria-label="Mission profile"></div></div>
+  <div class="clock">
+    <div><span class="lbl k">Mission time</span><span class="v" id="met">MET ---/--:--</span></div>
+    <div><span class="lbl k">UTC</span><span class="v" id="utc">--:--:--</span></div>
+  </div>
+  <div class="clock link-stat" title="One-way light time to Earth">
+    <div><span class="lbl k">Earth 1-way</span><span class="v" id="owlt">—</span></div>
+    <div><span class="lbl k">Round trip</span><span class="v" id="rtt" style="color:var(--ink)">—</span></div>
+  </div>
+  <div class="sw-pill" title="Live NASA DONKI / NOAA GOES space weather">
+    <span class="dot live" id="swDot"></span>
+    <div><span class="lbl k" style="display:block;margin-bottom:4px">Space weather</span><span class="mono" id="swLabel" style="font-size:12px">—</span></div>
+  </div>
+  <div><div class="seg" id="scenarioSeg" aria-label="Scenario"></div></div>
+  <div class="grow"></div>
+  <nav class="nav" style="border-right:0">
+    <a href="/astronaut" target="_blank" rel="noopener">Astronaut</a>
+    <a href="/holo" target="_blank" rel="noopener">Hologram</a>
+    <a href="#" id="pvtOpen">Reaction test</a>
+  </nav>
+</header>
+
+<div class="sitrep" id="sitrep" aria-live="polite"></div>
+<main class="shell">
+  <!-- LEFT: crew + ship vs body -->
+  <section class="col">
+    <div class="panel">
+      <div class="ph"><h2>Crew</h2><span class="lbl" id="crewCount">—</span></div>
+      <div id="crewList"></div>
+    </div>
+    <div class="panel verdict" id="verdict">
+      <div class="lbl">Ship vs. body</div>
+      <div class="verdict-big" id="verdictText">—</div>
+      <ul class="evidence" id="verdictEvidence"></ul>
+      <div class="env-grid" id="envGrid"></div>
+    </div>
+    <div class="panel" style="flex:1">
+      <div class="ph"><h2>Join the crew</h2><span class="lbl">astronaut view</span></div>
+      <div class="pb" style="display:flex;gap:12px;align-items:flex-start">
+        <div id="qr" style="width:92px;height:92px;flex-shrink:0;background:#e6edf3;padding:5px;border-radius:3px"></div>
+        <div style="font-size:12px;color:var(--ink-2)">Scan to open the astronaut's own view on your phone: health forecast, tap where it hurts, log a measurement, take the reaction test.</div>
+      </div>
+      <div class="pb" id="guests"></div>
+    </div>
+  </section>
+
+  <!-- CENTRE: hologram + forecast -->
+  <section class="col">
+    <div class="stage" id="stage">
+      <canvas id="holo"></canvas>
+      <div class="organ-labels" id="organLabels"></div>
+      <div class="stage-hud">
+        <div class="hud-tl">
+          <div class="who" id="whoName">—</div>
+          <div class="role" id="whoRole">—</div>
+          <div class="vit" id="whoVitals"></div>
+          <div class="wave"><canvas id="ecg"></canvas><div class="wave-k"><span>ECG II</span><span>RESP</span></div></div>
+        </div>
+        <div class="hud-tr">
+          <div class="seg" id="viewSeg"><button data-v="hologram" class="on">HOLOGRAM</button><button data-v="realistic">REALISTIC</button><button data-v="xray">X-RAY</button></div>
+          <div class="seg" id="wearSeg"><button data-w="cabin" class="on">CABIN</button><button data-w="suit">EVA SUIT · Z2</button></div>
+          <span class="chip" id="whoStatus">—</span>
+          <span class="chip" id="whoAttr" style="display:none"></span>
+        </div>
+        <div class="hud-bl">
+          <div class="lbl" style="margin-bottom:6px">Mission timeline — what space has done to this body</div>
+          <div class="daybar"><input type="range" id="dayRange" min="0" max="100" value="100" aria-label="Mission day"><span class="v" id="dayLabel">DAY —</span></div>
+        </div>
+        <div class="hud-br">
+          <button class="btn sm" id="speakBtn" title="Hear the briefing"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 6h2l3-3v10l-3-3H3z"/><path d="M11 5.5a3.5 3.5 0 010 5M12.8 3.8a6 6 0 010 8.4"/></svg>Briefing</button>
+          <button class="btn sm" id="serialBtn" title="Connect a pulse sensor over Web Serial (Chrome)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h3l1.5-4 3 8L11 8h3"/></svg>Live sensor</button>
+        </div>
+      </div>
+      <aside class="suit-panel" id="suitPanel"></aside>
+      <aside class="drawer" id="drawer" aria-live="polite">
+        <div class="drawer-head"><h3 id="drawerTitle">Region</h3><button class="btn sm ghost iconbtn" id="drawerClose" aria-label="Close">✕</button></div>
+        <div class="drawer-body" id="drawerBody"></div>
+      </aside>
+    </div>
+
+    <div class="panel" style="border-bottom:0;flex:1">
+      <div class="tabs" id="sigTabs" role="tablist" aria-label="Signal"></div>
+      <div class="fc-head">
+        <div><span class="lbl">Forecast</span> <span class="mono muted" id="fcTitle" style="font-size:12px;margin-left:6px">—</span></div>
+        <div class="seg" id="horizonSeg" aria-label="Horizon"></div>
+      </div>
+      <div class="fc-body">
+        <div class="fc-chart chart" id="fcChart"></div>
+        <div class="fc-side" id="fcSide"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: medical officer -->
+  <section class="col">
+    <div class="officer-head">
+      <div class="officer-title">
+        <div class="orb" id="orb"></div>
+        <div><h2>Medical officer</h2><div class="sub" id="officerSub">autonomous decision support</div></div>
+      </div>
+      <div class="brief" id="brief">—</div>
+    </div>
+    <div class="alerts" id="alerts"></div>
+    <div class="ask">
+      <div class="answer" id="answer"></div>
+      <form id="askForm" autocomplete="off">
+        <input id="askInput" placeholder="Ask SENTINEL — e.g. Is Vasquez cleared for the burn?" aria-label="Ask SENTINEL">
+        <button class="btn iconbtn" type="button" id="micBtn" title="Ask by voice"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="2" width="5" height="8" rx="2.5"/><path d="M3.5 8a4.5 4.5 0 009 0M8 12.5V14"/></svg></button>
+        <button class="btn primary" type="submit">Ask</button>
+      </form>
+      <div class="suggest" id="suggest"></div>
+    </div>
+  </section>
+
+  <!-- LOWER DECK -->
+  <section class="deck">
+    <div class="deck-tabs" id="deckTabs">
+      <button data-pane="risk" class="on">HRP risk matrix</button>
+      <button data-pane="whatif">Countermeasure what-if</button>
+      <button data-pane="earth">Race against Earth</button>
+      <button data-pane="ready">Readiness</button>
+      <button data-pane="rad">Radiation &amp; space weather</button>
+      <button data-pane="score">Model scorecard</button>
+      <button data-pane="data">Your data</button>
+      <button data-pane="methods">Methods &amp; sources</button>
+    </div>
+
+    <div class="deck-pane on" id="pane-risk">
+      <p class="deck-lead">Every score maps to one of <b>NASA's 17 Human Research Program risks</b>. Click a risk name to open NASA's own page. Scores combine live vitals, forecasts to mission end and the mission environment.</p>
+      <div id="matrix"></div>
+      <div class="legend">
+        <span><span class="sw" style="background:rgba(58,141,232,.35)"></span>Nominal &lt; 30</span>
+        <span><span class="sw" style="background:rgba(201,122,14,.6)"></span>Watch 30–59</span>
+        <span><span class="sw" style="background:rgba(207,75,181,.7)"></span>Act ≥ 60</span>
+      </div>
+    </div>
+
+    <div class="deck-pane" id="pane-whatif">
+      <p class="deck-lead">Move a countermeasure and watch the end-of-mission forecast change for <b id="wiWho">—</b>. Effects scale this astronaut's own measured trend. B-vitamin and thigh-cuff effects are hypotheses being tested in ongoing NASA studies.</p>
+      <div class="wi">
+        <div id="wiCtrls"></div>
+        <div>
+          <div class="wi-results" id="wiResults"></div>
+          <div class="chart" id="wiChart" style="margin-top:14px"></div>
+          <ul class="assump" id="wiAssump"></ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="deck-pane" id="pane-earth">
+      <p class="deck-lead" id="earthLead">—</p>
+      <div class="race">
+        <div class="race-side">
+          <h3>Onboard — SENTINEL</h3>
+          <div class="race-clock mono" id="shipClock">00:00</div>
+          <div class="muted" id="shipStatus" style="font-size:12px">Select an alert, then send.</div>
+          <ul class="race-log" id="shipLog"></ul>
+        </div>
+        <div class="race-side">
+          <h3>Earth — flight surgeon</h3>
+          <div class="race-clock mono" id="earthClock">--:--</div>
+          <div class="muted" id="earthStatus" style="font-size:12px">Waiting for packet.</div>
+          <div class="track" id="track"><div class="rail"></div><span class="end" style="left:0">SHIP</span><span class="end" style="right:0">EARTH</span></div>
+          <div class="packet" id="packet"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:24px;align-items:flex-start;margin-top:18px;flex-wrap:wrap">
+        <svg class="orbit" id="orbit" viewBox="0 0 420 300"></svg>
+        <div style="flex:1;min-width:260px" id="orbitNotes"></div>
+      </div>
+    </div>
+
+    <div class="deck-pane" id="pane-ready">
+      <p class="deck-lead">Predicted alertness from the <b>two-process model of sleep regulation</b> (Borbély), driven by each astronaut's actigraphy sleep history and planned sleep. Compared with a well-rested reference schedule.</p>
+      <div class="chart" id="readyChart"></div>
+      <div id="readyTable" style="margin-top:14px"></div>
+    </div>
+
+    <div class="deck-pane" id="pane-rad">
+      <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:28px">
+        <div>
+          <p class="deck-lead">Cumulative dose against NASA's <b>600 mSv career limit</b>. Chronic rate calibrated to measured data for this mission profile; forecast bands include solar-particle uncertainty.</p>
+          <div class="chart" id="doseChart"></div>
+        </div>
+        <div>
+          <p class="deck-lead">Live from <b>NASA CCMC DONKI</b> and NOAA GOES. Falls back to recent real DONKI events if the network is down.</p>
+          <div id="swPanel"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="deck-pane" id="pane-score">
+      <p class="deck-lead">How good are the forecasts? <b>Rolling-origin backtests</b> on every astronaut and signal. Skill compares against a naive forecast (same hour yesterday / last value); coverage shows how often the truth landed inside the 80 % and 95 % bands on held-out data.</p>
+      <div class="score-grid" id="scoreGrid"></div>
+      <div class="scroll"><table class="data" id="scoreTable"></table></div>
+    </div>
+
+    <div class="deck-pane" id="pane-data">
+      <p class="deck-lead">Plug in real data. Upload a CSV with a <b>timestamp</b> column, an <b>astronaut</b> column (id or name) and any signals (heart_rate, spo2, temperature, systolic, diastolic, hrv, respiratory_rate, sleep_hours, glucose, mood …). SENTINEL maps the columns, aligns them to the mission clock and re-forecasts.</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="btn primary" style="cursor:pointer"><input type="file" id="csvFile" accept=".csv,text/csv" hidden>Upload CSV</label>
+        <a class="btn" href="/api/template.csv">Download template</a>
+        <button class="btn ghost" id="resetData">Reset to synthetic crew</button>
+      </div>
+      <pre class="mono" id="ingestReport" style="margin-top:14px;font-size:11.5px;color:var(--ink-2);white-space:pre-wrap"></pre>
+      <h3 class="lbl" style="margin-top:20px">Log a measurement</h3>
+      <form id="logForm" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <select id="logCrew" class="btn"></select>
+        <select id="logSig" class="btn">
+          <option value="glucose">Blood glucose (mg/dL)</option><option value="mood">Mood (0–100)</option>
+          <option value="sleep_h">Sleep (h)</option><option value="mass">Body mass (kg)</option><option value="onsd">ONSD (mm)</option>
+        </select>
+        <input id="logVal" class="btn" style="width:110px" placeholder="value" inputmode="decimal">
+        <button class="btn primary" type="submit">Log</button>
+      </form>
+    </div>
+
+    <div class="deck-pane" id="pane-methods"></div>
+
+    <div class="footer-note">
+      <span>DEADSTAR SENTINEL is decision support, not a medical device. Crew data is synthetic and calibrated to NASA-published rates; names are fictional.</span>
+      <span class="mono">NASA Space Apps Challenge 2026 · Kuwait · Team DEADSTAR</span>
+    </div>
+  </section>
+</main>
+
+<div class="modal-back" id="modal"><div class="modal"><div class="modal-head"><h3 id="modalTitle">—</h3><button class="btn sm ghost iconbtn" id="modalClose" aria-label="Close">✕</button></div><div class="modal-body" id="modalBody"></div></div></div>
+<div class="tip" id="tip"></div>
+<div class="boot" id="boot"><div class="boot-in">
+  <svg viewBox="0 0 32 32" width="44" height="44" aria-hidden="true"><circle cx="16" cy="16" r="12.5" fill="none" stroke="#5ce1e6" stroke-width="1.2" stroke-dasharray="58 8 6 6"><animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16" dur="6s" repeatCount="indefinite"/></circle><circle cx="16" cy="16" r="6" fill="none" stroke="#5ce1e6" stroke-width="1" opacity=".55"/><circle cx="16" cy="16" r="2.2" fill="#e6edf3"/></svg>
+  <div class="boot-title">DEADSTAR <span>SENTINEL</span></div>
+  <div class="boot-sub">Autonomous medical officer · predictive crew digital twin</div>
+  <pre class="boot-log" id="bootLog"></pre>
+  <div class="boot-bar"><span id="bootBar"></span></div>
+  <div class="boot-skip">click or press any key to skip</div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script src="/static/vendor/qrcode.js"></script>
+<script type="module" src="/static/js/console.js"></script>
+</body>
+</html>
