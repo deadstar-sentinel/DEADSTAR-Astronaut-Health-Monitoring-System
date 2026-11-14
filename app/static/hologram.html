@@ -5,92 +5,204 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SENTINEL · Body twin</title>
 <style>
-  html,body{margin:0;height:100%;background:#05080D;color:#E6EDF3;font:12px "IBM Plex Mono",ui-monospace,monospace;overflow:hidden}
-  #hud{position:fixed;left:12px;bottom:12px;letter-spacing:.06em}
+  html,body{margin:0;height:100%;overflow:hidden;color:#E6EDF3;font:12px "IBM Plex Mono",ui-monospace,monospace;
+    background:radial-gradient(ellipse at 50% 55%,#0c1c28 0%,#060b11 55%,#030507 100%)}
+  canvas{display:block}
+  .bar{position:fixed;left:0;right:0;height:9vh;background:#000;z-index:3;transition:height 1.2s}
+  #topbar{top:0} #botbar{bottom:0}
+  body:not(.cinema) .bar{height:0}
+  #title{position:fixed;left:4vw;bottom:13vh;z-index:4;letter-spacing:.18em;font-size:11px;color:#8A99A8}
+  #title b{display:block;color:#E6EDF3;font:600 22px/1.3 "IBM Plex Sans",system-ui,sans-serif;letter-spacing:.22em;margin-top:6px}
+  #hud{position:fixed;left:14px;bottom:12px;letter-spacing:.06em;color:#8A99A8;z-index:4}
   #hud b{color:#5CE1E6}
-  #card{position:fixed;right:12px;top:12px;max-width:260px;padding:10px;border:1px solid #1A2430;background:#0B1118;display:none}
-  .pyr #hud,.pyr #card{display:none}
+  .tag{position:fixed;z-index:4;pointer-events:none;font-size:10.5px;letter-spacing:.12em;white-space:nowrap;
+    padding:3px 7px;border-left:1px solid currentColor;background:rgba(5,8,13,.55);transform:translate(14px,-50%)}
+  #card{position:fixed;right:14px;top:14px;max-width:260px;padding:10px 12px;border:1px solid #1A2430;background:rgba(11,17,24,.92);display:none;z-index:5}
+  .pyr #hud,.pyr #card,.pyr #title,.pyr .tag,.pyr .bar{display:none}
+  .pyr{background:#000}
 </style>
-<!-- Offline rule: for the stage laptop, download three.module.js + addons into /static/vendor and point the import map there. -->
+<!-- Stage laptop (offline): vendor three@0.160.0 into /static/vendor and repoint this map. -->
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
             "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
 </script>
 </head>
 <body>
-<div id="hud">SENTINEL BODY TWIN · <b id="who">MORI</b> · click a hotspot · <span id="src">model: loading</span></div>
+<div class="bar" id="topbar"></div><div class="bar" id="botbar"></div>
+<div id="title">SENTINEL · DIGITAL TWIN · <span id="met">MET 150/04:12:00</span><b>FLIGHT ENGINEER MORI</b></div>
+<div id="hud">BODY TWIN · <b>MORI</b> · <span id="src">model: loading</span> · C: cinema · P: pyramid</div>
 <div id="card"></div>
 <script type="module">
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const q = new URLSearchParams(location.search);
-const PYRAMID = q.get("mode") === "pyramid";          // Pepper's ghost: 4 views on black
+const PYRAMID = q.get("mode") === "pyramid";
 if (PYRAMID) document.body.classList.add("pyr");
+if (q.get("cinema") === "1") document.body.classList.add("cinema");
+addEventListener("keydown", e => {
+  if (e.key === "c") document.body.classList.toggle("cinema");
+  if (e.key === "p") location.search = PYRAMID ? "" : "?mode=pyramid";
+});
 
-// Status colours from the visual language; the card always prints the word too (colorblind-safe).
+const CYAN = new THREE.Color("#5CE1E6");
 const LEVEL = { nom: ["#3DD68C", "NOMINAL ●"], cau: ["#F5B83D", "CAUTION ▲"], crit: ["#FF5D5D", "CRITICAL ■"] };
-const status = { lymph: "cau", eyes: "cau" };          // demo default: Mori's story
+const status = { lymph: "cau", eyes: "cau" };
 (q.get("status") || "").split(",").filter(Boolean).forEach(p => { const [k, v] = p.split(":"); status[k] = v; });
-const sys = name => name.replace(/^HS_/, "").replace(/_[LR]$/, "");
+const sys = n => n.replace(/^HS_/, "").replace(/_[LR]$/, "");
 
-// Same hotspot coordinates as blender/build_astronaut.py (Blender Z-up -> Three Y-up: x, z, -y).
+// Hotspots, same coordinates as blender/build_astronaut.py (Blender Z-up -> Three Y-up)
 const B = { HS_brain:[0,.01,1.70], HS_eyes_L:[-.035,-.09,1.665], HS_eyes_R:[.035,-.09,1.665], HS_lymph:[.05,-.04,1.52],
   HS_heart:[.035,-.07,1.33], HS_lungs_L:[-.08,-.04,1.36], HS_lungs_R:[.08,-.04,1.36], HS_spine:[0,.08,1.20],
   HS_gut:[0,-.08,1.07], HS_hip_L:[-.10,-.02,.93], HS_hip_R:[.10,-.02,.93], HS_leg_L:[-.11,-.05,.50], HS_leg_R:[.11,-.05,.50] };
 const toThree = ([x, y, z]) => new THREE.Vector3(x, z, -y);
 
-const scene = new THREE.Scene();
-const twin = new THREE.Group(); scene.add(twin);
+// ---------- renderer ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: PYRAMID });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x05080d, 0.06);
+scene.background = PYRAMID ? new THREE.Color(0x000000) : (() => {      // deep-space radial backdrop
+  const c = document.createElement("canvas"); c.width = c.height = 512; const x = c.getContext("2d");
+  const g = x.createRadialGradient(256, 290, 10, 256, 290, 360);
+  g.addColorStop(0, "#0d2230"); g.addColorStop(.45, "#071119"); g.addColorStop(1, "#020406");
+  x.fillStyle = g; x.fillRect(0, 0, 512, 512); const tx = new THREE.CanvasTexture(c); tx.colorSpace = THREE.SRGBColorSpace; return tx; })();
+const twin = new THREE.Group(); twin.position.y = -0.9; scene.add(twin);
 
+// ---------- hologram material: fresnel rim, scan bands, vertical sweep ----------
 const holo = new THREE.ShaderMaterial({
-  uniforms: { t: { value: 0 }, c: { value: new THREE.Color("#5CE1E6") } },
+  uniforms: { t: { value: 0 }, c: { value: CYAN } },
   vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
     void main(){ vec4 w = modelMatrix*vec4(position,1.); vY = w.y;
       vN = normalize(normalMatrix*normal); vec4 mv = viewMatrix*w; vV = normalize(-mv.xyz);
       gl_Position = projectionMatrix*mv; }`,
   fragmentShader: `uniform float t; uniform vec3 c; varying vec3 vN; varying vec3 vV; varying float vY;
-    void main(){ float rim = pow(1.-abs(dot(vN,vV)), 2.2);
-      float scan = smoothstep(.85,1.,sin(vY*180.-t*3.))*.18;
-      float sweep = smoothstep(.04,0.,abs(fract(t*.12)*2.-vY));
-      float flick = .94+.06*sin(t*37.);
-      gl_FragColor = vec4(c*(rim*1.4+scan+sweep*.8+.06)*flick, (rim*.85+scan+sweep*.5+.05)*flick); }`,
+    void main(){
+      float rim = pow(1.-abs(dot(vN,vV)), 2.6);
+      float bands = smoothstep(.92,1.,sin(vY*240.-t*2.2))*.22;
+      float sweepY = mod(t*.35, 2.6) - 1.0;
+      float sweep = exp(-pow((vY-sweepY)*28.,2.));
+      float flick = .96+.04*sin(t*41.)*sin(t*7.3);
+      vec3 col = c*(rim*1.6 + bands + sweep*1.4 + .035);
+      float a = clamp(rim*.9 + bands + sweep*.7 + .03, 0., 1.)*flick;
+      gl_FragColor = vec4(col*flick, a); }`,
   transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
 });
+const wire = new THREE.MeshBasicMaterial({ color: CYAN, wireframe: true, transparent: true, opacity: .045,
+  blending: THREE.AdditiveBlending, depthWrite: false });
 
-const spots = [];
-function addSpot(name, pos) {
-  const lv = LEVEL[status[sys(name)] || "nom"];
-  const m = new THREE.Mesh(new THREE.SphereGeometry(.022, 16, 12), new THREE.MeshBasicMaterial({ color: lv[0], transparent: true }));
-  m.position.copy(pos); m.userData.name = name; twin.add(m); spots.push(m);
+function dress(mesh) {      // hologram skin + faint wireframe layer
+  mesh.material = holo;
+  const w = new THREE.Mesh(mesh.geometry, wire); w.scale.setScalar(1.002); mesh.add(w);
 }
 
-function fallbackFigure() {   // built-in figure if astronaut.glb is missing
-  const g = new THREE.Group(), cap = (a, b, r) => { const A = toThree(a), Bv = toThree(b), d = Bv.clone().sub(A);
-    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, d.length(), 8, 16), holo);
-    m.position.copy(A.clone().add(Bv).multiplyScalar(.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize()); g.add(m); };
-  const ball = (c, s) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), holo); m.position.copy(toThree(c)); m.scale.set(s[0], s[2], s[1]); g.add(m); };
-  ball([0,0,1.66],[.09,.1,.12]); cap([0,0,1.5],[0,0,1.56],.055); ball([0,0,1.33],[.19,.12,.2]); ball([0,0,1.1],[.16,.11,.15]); ball([0,0,.96],[.18,.12,.1]);
-  for (const s of [-1, 1]) { cap([s*.21,0,1.44],[s*.26,0,1.16],.052); cap([s*.26,0,1.16],[s*.29,0,.9],.042);
-    cap([s*.095,0,.92],[s*.11,0,.5],.078); cap([s*.11,0,.5],[s*.11,0,.09],.058); }
+// ---------- fallback figure (used when astronaut.glb is not there) ----------
+function fallbackFigure() {
+  const g = new THREE.Group();
+  const add = geo => { const m = new THREE.Mesh(geo); dress(m); g.add(m); return m; };
+  const limb = (a, b, r) => { const A = toThree(a), Bv = toThree(b), d = Bv.clone().sub(A);
+    const m = add(new THREE.CapsuleGeometry(r, d.length(), 12, 24));
+    m.position.copy(A.clone().add(Bv).multiplyScalar(.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), d.normalize()); };
+  const blob = (c, s) => { const m = add(new THREE.SphereGeometry(1, 48, 32)); m.position.copy(toThree(c)); m.scale.set(s[0], s[2], s[1]); };
+  blob([0,0,1.665],[.085,.1,.118]); limb([0,.005,1.5],[0,.005,1.57],.05);
+  blob([0,0,1.34],[.18,.11,.19]); blob([0,0,1.12],[.15,.1,.15]); blob([0,0,.96],[.17,.11,.1]);
+  for (const s of [-1, 1]) {
+    blob([s*.18,0,1.45],[.075,.065,.06]);
+    limb([s*.21,0,1.44],[s*.26,.01,1.16],.05); limb([s*.26,.01,1.16],[s*.29,-.02,.9],.04);
+    blob([s*.3,-.025,.83],[.035,.022,.06]);
+    limb([s*.095,0,.92],[s*.11,-.01,.5],.075); limb([s*.11,-.01,.5],[s*.11,.01,.09],.055);
+    blob([s*.11,-.05,.04],[.045,.11,.035]);
+  }
   return g;
 }
 
+// ---------- hotspots: core + halo, HTML tag when not nominal ----------
+const spots = [], haloTex = (() => { const c = document.createElement("canvas"); c.width = c.height = 64;
+  const x = c.getContext("2d"), gr = x.createRadialGradient(32,32,0,32,32,32);
+  gr.addColorStop(0,"rgba(255,255,255,1)"); gr.addColorStop(.25,"rgba(255,255,255,.45)"); gr.addColorStop(1,"rgba(255,255,255,0)");
+  x.fillStyle = gr; x.fillRect(0,0,64,64); return new THREE.CanvasTexture(c); })();
+function addSpot(name, pos) {
+  const lv = LEVEL[status[sys(name)] || "nom"], col = new THREE.Color(lv[0]);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(.012, 16, 12), new THREE.MeshBasicMaterial({ color: col }));
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTex, color: col, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  halo.scale.setScalar(.09); core.add(halo); core.position.copy(pos); core.userData = { name, halo }; twin.add(core); spots.push(core);
+  if (status[sys(name)] && status[sys(name)] !== "nom" && !name.endsWith("_R")) {
+    const tag = document.createElement("div"); tag.className = "tag"; tag.style.color = lv[0];
+    tag.textContent = `${sys(name).toUpperCase()} · ${lv[1]}`; document.body.appendChild(tag); core.userData.tag = tag;
+  }
+}
+
 new GLTFLoader().load("/static/models/astronaut.glb", gltf => {
-  gltf.scene.traverse(o => { if (o.isMesh) o.material = holo; if (o.name.startsWith("HS_")) { const p = new THREE.Vector3(); o.getWorldPosition(p); addSpot(o.name, p); } });
-  twin.add(gltf.scene); document.getElementById("src").textContent = "model: astronaut.glb (Blender)";
+  const meshes = [], hs = [];
+  gltf.scene.traverse(o => { if (o.isMesh) meshes.push(o); if (o.name.startsWith("HS_")) hs.push(o); });
+  meshes.forEach(dress);
+  hs.forEach(o => { const p = new THREE.Vector3(); o.getWorldPosition(p); addSpot(o.name, p); });
+  twin.add(gltf.scene); document.getElementById("src").textContent = "model: astronaut.glb";
 }, undefined, () => {
   twin.add(fallbackFigure()); Object.entries(B).forEach(([n, p]) => addSpot(n, toThree(p)));
-  document.getElementById("src").textContent = "model: built-in fallback";
+  document.getElementById("src").textContent = "model: built-in";
 });
-twin.position.y = -0.9;
 
-// ---- cameras ----
+// ---------- emitter: base disc, rings, light beam, rising motes ----------
+const emitter = new THREE.Group(); emitter.position.y = -0.92; scene.add(emitter);
+const add = (geo, mat) => { const m = new THREE.Mesh(geo, mat); emitter.add(m); return m; };
+const glow = (o) => new THREE.MeshBasicMaterial({ color: CYAN, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const disc = add(new THREE.CircleGeometry(.5, 96), new THREE.ShaderMaterial({
+  uniforms: { c: { value: CYAN } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader: `uniform vec3 c; varying vec2 vU; void main(){ float d = length(vU-.5)*2.;
+    float a = smoothstep(1.,.0,d)*.35 + smoothstep(.02,0.,abs(d-.96))*.9 + smoothstep(.015,0.,abs(d-.62))*.45;
+    gl_FragColor = vec4(c*a, a); }` }));
+disc.rotation.x = -Math.PI / 2;
+const rings = [[.56, .565, .5], [.66, .663, .25], [.38, .384, .35]].map(([r0, r1, o]) => {
+  const m = add(new THREE.RingGeometry(r0, r1, 128, 1, 0, Math.PI * 1.6), glow(o)); m.rotation.x = -Math.PI / 2; return m; });
+const beam = add(new THREE.CylinderGeometry(.44, .5, 2.9, 64, 1, true), new THREE.ShaderMaterial({
+  uniforms: { c: { value: CYAN }, t: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexShader: `varying vec2 vU; void main(){ vU = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader: `uniform vec3 c; uniform float t; varying vec2 vU; void main(){
+    float a = pow(1.-vU.y, 2.2)*.16*(.85+.15*sin(vU.x*60.+t*.8)); gl_FragColor = vec4(c*a, a); }` }));
+beam.position.y = 1.45;
+const N = 260, mp = new Float32Array(N * 3), seed = new Float32Array(N);
+for (let i = 0; i < N; i++) { const r = Math.sqrt(Math.random()) * .42, a = Math.random() * 6.283;
+  mp.set([Math.cos(a) * r, Math.random() * 2.6, Math.sin(a) * r], i * 3); seed[i] = .05 + Math.random() * .12; }
+const motesGeo = new THREE.BufferGeometry(); motesGeo.setAttribute("position", new THREE.BufferAttribute(mp, 3));
+emitter.add(new THREE.Points(motesGeo, new THREE.PointsMaterial({ color: CYAN, size: .012, transparent: true, opacity: .55,
+  blending: THREE.AdditiveBlending, depthWrite: false })));
+
+// ---------- distant stars (static: only meaningful motion) ----------
+const S = 1800, sp = new Float32Array(S * 3);
+for (let i = 0; i < S; i++) { const v = new THREE.Vector3().randomDirection().multiplyScalar(40 + Math.random() * 20); sp.set([v.x, v.y, v.z], i * 3); }
+const starGeo = new THREE.BufferGeometry(); starGeo.setAttribute("position", new THREE.BufferAttribute(sp, 3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x9fb6c8, size: 1.1, sizeAttenuation: false, transparent: true, opacity: .55, fog: false }));
+if (!PYRAMID) scene.add(stars);
+
+// ---------- cameras ----------
+const cam = new THREE.PerspectiveCamera(32, 1, .05, 120);
 const cams = [0, 90, 180, 270].map(deg => { const c = new THREE.PerspectiveCamera(30, 1, .1, 20), a = THREE.MathUtils.degToRad(deg);
-  c.position.set(Math.sin(a) * 4.2, .1, Math.cos(a) * 4.2); c.lookAt(0, 0, 0); return c; });
-const main = cams[0];
+  c.position.set(Math.sin(a) * 4.4, .1, Math.cos(a) * 4.4); c.lookAt(0, 0, 0); return c; });
+
+// ---------- post: bloom + film grade (vignette, grain, slight chromatic aberration) ----------
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, cam));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .95, .55, .0); composer.addPass(bloom);
+const grade = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, t: { value: 0 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float t; varying vec2 vUv;
+    void main(){ vec2 c = vUv-.5; float d = length(c); vec2 o = c*d*.006;
+      vec3 col = vec3(texture2D(tDiffuse, vUv+o).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv-o).b);
+      col *= mix(1., smoothstep(.95,.2,d), .55);
+      float n = fract(sin(dot(vUv*vec2(1733.,947.)+t, vec2(12.9898,78.233)))*43758.5453);
+      col += (n-.5)*.028;
+      gl_FragColor = vec4(col, 1.); }` });
+composer.addPass(grade); composer.addPass(new OutputPass());
 
 let out2d, ctx;
 if (PYRAMID) { out2d = document.createElement("canvas"); document.body.appendChild(out2d); ctx = out2d.getContext("2d"); }
@@ -98,41 +210,60 @@ else document.body.appendChild(renderer.domElement);
 
 function resize() {
   const W = innerWidth, H = innerHeight;
-  if (PYRAMID) { const S = Math.min(W, H); out2d.width = out2d.height = S; out2d.style.cssText = `position:absolute;left:${(W-S)/2}px;top:${(H-S)/2}px`;
-    renderer.setSize(S / 3, S / 3, false); cams.forEach(c => { c.aspect = 1; c.updateProjectionMatrix(); }); }
-  else { renderer.setSize(W, H); main.aspect = W / H; main.updateProjectionMatrix(); }
+  if (PYRAMID) { const s = Math.min(W, H); out2d.width = out2d.height = s;
+    out2d.style.cssText = `position:absolute;left:${(W - s) / 2}px;top:${(H - s) / 2}px`;
+    renderer.setSize(s / 3, s / 3, false); cams.forEach(c => { c.aspect = 1; c.updateProjectionMatrix(); }); }
+  else { renderer.setSize(W, H); composer.setSize(W, H); bloom.setSize(W, H); cam.aspect = W / H; cam.updateProjectionMatrix(); }
 }
 addEventListener("resize", resize); resize();
 
-// ---- click a hotspot -> card ----
+// ---------- click a hotspot ----------
 const ray = new THREE.Raycaster(), card = document.getElementById("card");
 renderer.domElement.addEventListener("click", e => {
-  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), main);
-  const hit = ray.intersectObjects(spots)[0];
+  ray.setFromCamera(new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1), cam);
+  const hit = ray.intersectObjects(spots, true)[0];      // halos make the targets easy to hit
   if (!hit) { card.style.display = "none"; return; }
-  const s = sys(hit.object.userData.name), lv = LEVEL[status[s] || "nom"];
-  card.innerHTML = `<div style="color:#8A99A8;letter-spacing:.08em">${s.toUpperCase()}</div><div style="color:${lv[0]};margin:4px 0">${lv[1]}</div>
-    <div style="color:#8A99A8">Forecast panel for this system opens here (engine: forecast.py).</div>`;
+  const obj = hit.object.userData.name ? hit.object : hit.object.parent;
+  const s = sys(obj.userData.name), lv = LEVEL[status[s] || "nom"];
+  card.innerHTML = `<div style="color:#8A99A8;letter-spacing:.12em">${s.toUpperCase()}</div>
+    <div style="color:${lv[0]};margin:4px 0 6px">${lv[1]}</div><div style="color:#8A99A8">Forecast for this system opens here.</div>`;
   card.style.display = "block";
   dispatchEvent(new CustomEvent("sentinel:hotspot", { detail: s }));
 });
+window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) {
+  m.material.color.set(LEVEL[l][0]); m.userData.halo.material.color.set(LEVEL[l][0]); } }); } };
 
-// Hook for the console: setStatus("eyes", "crit")
-window.SENTINEL = { setStatus(s, l) { status[s] = l; spots.forEach(m => { if (sys(m.userData.name) === s) m.material.color.set(LEVEL[l][0]); }); } };
-
-// ---- loop ----
-const clock = new THREE.Clock();
+// ---------- loop ----------
+const clock = new THREE.Clock(), v = new THREE.Vector3(), metEl = document.getElementById("met"), pad = n => String(Math.floor(n)).padStart(2, "0");
 renderer.setAnimationLoop(() => {
   const t = clock.getElapsedTime();
-  holo.uniforms.t.value = t; twin.rotation.y = t * .25;
-  spots.forEach((m, i) => { const pulse = status[sys(m.userData.name)] && status[sys(m.userData.name)] !== "nom";
-    m.scale.setScalar(pulse ? 1 + .35 * Math.sin(t * 4 + i) : 1); });
-  if (!PYRAMID) { renderer.render(scene, main); return; }
-  const S = out2d.width, s = S / 3; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, S, S);
-  // heads point outward; four views: front, right side, back, left side
-  [[S/2, s/2, 0], [S - s/2, S/2, 90], [S/2, S - s/2, 180], [s/2, S/2, 270]].forEach(([x, y, rot], i) => {
-    renderer.render(scene, cams[i]); ctx.save(); ctx.translate(x, y); ctx.rotate(rot * Math.PI / 180);
-    ctx.drawImage(renderer.domElement, -s/2, -s/2, s, s); ctx.restore(); });
+  holo.uniforms.t.value = t; beam.material.uniforms.t.value = t; grade.uniforms.t.value = t;
+  rings.forEach((r, i) => r.rotation.z = t * (i % 2 ? -.12 : .08) * (i + 1));
+  const p = motesGeo.attributes.position.array;
+  for (let i = 0; i < N; i++) { p[i * 3 + 1] += seed[i] * .006; if (p[i * 3 + 1] > 2.6) p[i * 3 + 1] = 0; }
+  motesGeo.attributes.position.needsUpdate = true;
+  spots.forEach((m, i) => { const alert = status[sys(m.userData.name)] && status[sys(m.userData.name)] !== "nom";
+    m.userData.halo.scale.setScalar(alert ? .09 + .05 * (.5 + .5 * Math.sin(t * 3.2 + i)) : .05); });
+  const s = 150 * 86400 + 4 * 3600 + 12 * 60 + t;
+  metEl.textContent = `MET ${pad(s / 86400).padStart(3, "0")}/${pad(s % 86400 / 3600)}:${pad(s % 3600 / 60)}:${pad(s % 60)}`;
+
+  if (PYRAMID) {
+    twin.rotation.y = t * .3;
+    const W = out2d.width, w = W / 3; ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, W);
+    [[W / 2, w / 2, 0], [W - w / 2, W / 2, 90], [W / 2, W - w / 2, 180], [w / 2, W / 2, 270]].forEach(([x, y, rot], i) => {
+      renderer.render(scene, cams[i]); ctx.save(); ctx.translate(x, y); ctx.rotate(rot * Math.PI / 180);
+      ctx.drawImage(renderer.domElement, -w / 2, -w / 2, w, w); ctx.restore(); });
+    return;
+  }
+  // slow cinematic orbit: wide establishing arc, gentle crane up and down
+  const a = t * .11, r = 3.7 + .35 * Math.sin(t * .07);
+  cam.position.set(Math.sin(a) * r, .12 + .28 * Math.sin(t * .05), Math.cos(a) * r);
+  cam.lookAt(0, .02, 0);
+  composer.render();
+  spots.forEach(m => { const tag = m.userData.tag; if (!tag) return;
+    m.getWorldPosition(v); v.project(cam);
+    const hidden = v.z > 1; tag.style.display = hidden ? "none" : "block";
+    tag.style.left = `${(v.x * .5 + .5) * innerWidth}px`; tag.style.top = `${(-v.y * .5 + .5) * innerHeight}px`; });
 });
 </script>
 </body>
