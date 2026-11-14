@@ -1,0 +1,12 @@
+{
+  "_note": "Synthetic medical kit for the demo. Items and quantities are placeholders, not a real NASA manifest.",
+  "items": [
+    {"id": "thermometer", "qty": 2},
+    {"id": "pulse_oximeter", "qty": 2},
+    {"id": "bp_cuff", "qty": 1},
+    {"id": "glucometer", "qty": 1, "strips": 100},
+    {"id": "ultrasound_probe", "qty": 1},
+    {"id": "antipyretic", "qty": 40, "unit": "tablets"},
+    {"id": "oxygen_mask", "qty": 4}
+  ]
+}
