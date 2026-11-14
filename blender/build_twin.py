@@ -170,8 +170,13 @@ def mirror(fn):
 
 
 # ================================================================ scene + materials
-bpy.ops.object.select_all(action="SELECT")
-bpy.ops.object.delete()
+# Clean slate, including hidden objects and orphan data, so every name is exact (no ".001").
+for o in list(bpy.data.objects):
+    bpy.data.objects.remove(o, do_unlink=True)
+for coll in (bpy.data.meshes, bpy.data.curves, bpy.data.metaballs, bpy.data.materials, bpy.data.textures):
+    for blk in list(coll):
+        if blk.users == 0:
+            coll.remove(blk)
 CYAN = (0.36, 0.88, 0.90)
 M_SKIN = material("MAT_skin", CYAN, .5)
 M_BONE = material("MAT_bone", (0.78, 0.93, 0.96), .8)
@@ -184,9 +189,9 @@ B = [E((0, .012, 1.685), (.074, .088, .086)),            # cranium
      E((0, -.03, 1.605), (.056, .052, .052)),            # face / jaw
      E((0, -.088, 1.628), (.009, .014, .017)),           # nose
      E((0, -.068, 1.566), (.024, .02, .017)),            # chin
-     C((0, .008, 1.49), (0, .0, 1.58), .052),            # neck
+     C((0, .008, 1.49), (0, .0, 1.58), .046),            # neck
      E((0, -.004, 1.355), (.152, .1, .15)),              # rib cage
-     E((0, -.008, 1.17), (.122, .086, .12)),             # abdomen
+     E((0, -.008, 1.17), (.11, .084, .12)),              # abdomen (narrower waist)
      E((0, .004, .985), (.15, .1, .09))]                 # pelvis
 for s in (-1, 1):
     B += [E((s * .075, -.02, 1.648), (.008, .016, .026)),                     # ear
@@ -194,23 +199,29 @@ for s in (-1, 1):
           C((s * .05, .03, 1.535), (s * .15, .02, 1.475), .034),              # trapezius
           E((s * .075, -.068, 1.385), (.07, .03, .052)),                      # pectoral
           E((s * .19, 0, 1.44), (.052, .052, .062)),                          # deltoid
-          E((s * .1, 0, 1.13), (.042, .06, .085)),                            # oblique
+          E((s * .1, 0, 1.13), (.036, .058, .085)),                           # oblique
           E((s * .07, .062, .93), (.072, .062, .072)),                        # gluteus
-          C((s * .2, -.012, 1.4), (s * .24, -.012, 1.2), .046),               # biceps
-          C((s * .212, .026, 1.4), (s * .246, .022, 1.2), .043),              # triceps
-          E((s * .25, .01, 1.165), (.03, .03, .03)),                          # elbow
-          C((s * .255, 0, 1.15), (s * .285, -.02, .94), .041),                # forearm (flexors)
-          C((s * .27, .004, 1.06), (s * .29, -.02, .92), .03),                # forearm (extensors)
-          E((s * .29, -.02, .91), (.022, .015, .015)),                        # wrist
-          E((s * .3, -.026, .86), (.012, .03, .04)),                          # palm
+          # arm: tapered chain shoulder -> elbow -> wrist (no constant-width tubes)
+          E((s * .205, 0, 1.38), (.047, .049, .07)),                          # upper arm (deltoid insertion)
+          E((s * .224, -.004, 1.29), (.043, .045, .07)),                      # biceps / triceps belly
+          E((s * .24, .004, 1.21), (.035, .037, .05)),                        # lower upper arm
+          E((s * .25, .012, 1.165), (.03, .03, .028)),                        # elbow
+          E((s * .258, 0, 1.11), (.039, .036, .062)),                         # forearm, muscular top
+          E((s * .272, -.008, 1.02), (.031, .028, .06)),                      # forearm, middle
+          E((s * .285, -.018, .95), (.023, .02, .04)),                        # forearm, tendons
+          E((s * .29, -.02, .91), (.02, .015, .015)),                         # wrist
+          E((s * .298, -.026, .862), (.012, .03, .04)),                       # palm
           C((s * .29, -.046, .865), (s * .296, -.07, .812), .0095),           # thumb
-          C((s * .1, -.022, .9), (s * .11, -.03, .53), .076),                 # quadriceps
-          C((s * .1, .03, .9), (s * .105, .02, .56), .066),                   # hamstrings
-          E((s * .06, 0, .82), (.03, .04, .08)),                              # adductors
-          E((s * .11, -.02, .5), (.045, .04, .04)),                           # knee
-          E((s * .11, .035, .38), (.045, .04, .09)),                          # calf
-          C((s * .11, -.01, .48), (s * .11, 0, .1), .045),                    # shin
-          E((s * .11, .01, .08), (.03, .03, .025)),                           # ankle
+          # leg: thigh tapers into a defined knee, calf bulges behind a slim shin
+          E((s * .1, 0, .84), (.083, .086, .1)),                              # upper thigh
+          E((s * .104, -.008, .72), (.07, .073, .09)),                        # mid thigh (quadriceps)
+          E((s * .108, -.012, .6), (.056, .058, .07)),                        # lower thigh
+          E((s * .065, 0, .8), (.03, .045, .07)),                             # adductors
+          E((s * .11, -.016, .5), (.045, .043, .038)),                        # knee
+          E((s * .11, .026, .39), (.05, .054, .085)),                         # calf (gastrocnemius)
+          E((s * .11, -.012, .4), (.038, .033, .09)),                         # shin
+          E((s * .11, .004, .22), (.033, .033, .09)),                         # lower leg
+          E((s * .11, .01, .09), (.027, .027, .028)),                         # ankle
           E((s * .11, .03, .04), (.03, .035, .03)),                           # heel
           C((s * .11, .02, .03), (s * .115, -.12, .02), .035),                # foot
           E((s * .115, -.13, .02), (.035, .02, .015))]                        # toes
@@ -426,3 +437,26 @@ bpy.ops.object.select_all(action="DESELECT")
 bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=False)
 total = sum(tris(o) for o in bpy.data.objects if o.type == "MESH")
 print(f"SENTINEL: exported {out}  ({total} triangles, {len(HOTSPOTS)} hotspots)")
+
+
+# ================================================================ inspection view (only when run inside the Blender UI)
+if bpy.context.screen:
+    for o in bpy.data.objects:
+        if o.name.startswith("FX_beam"):
+            o.hide_set(True)
+        if o.type == "MESH":
+            n = o.name
+            o.color = ((0.95, .3, .3, 1) if n.startswith(("ORG_heart", "ORG_vessels")) else
+                       (0.95, .75, .3, 1) if n.startswith(("ORG_lung", "ORG_airways")) else
+                       (0.92, .92, .92, 1) if n.startswith(("ORG_skull", "ORG_ribs", "ORG_spine", "ORG_pelvis", "ORG_shoulders", "ORG_bones")) else
+                       (0.75, .5, .95, 1) if n.startswith("ORG_") else (0.3, .9, .9, 1))
+    for area in bpy.context.screen.areas:
+        if area.type == "VIEW_3D":
+            sh = area.spaces[0].shading
+            sh.type, sh.color_type, sh.show_xray, sh.xray_alpha = "SOLID", "OBJECT", True, 0.3
+            region = next(r for r in area.regions if r.type == "WINDOW")
+            bpy.ops.object.select_all(action="DESELECT")
+            bpy.data.objects["Body"].select_set(True)
+            with bpy.context.temp_override(area=area, region=region):
+                bpy.ops.view3d.view_axis(type="FRONT")
+                bpy.ops.view3d.view_selected()
