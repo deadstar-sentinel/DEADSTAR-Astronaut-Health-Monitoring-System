@@ -236,7 +236,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       tl.fromTo(".verdict", { scale: 2.3, autoAlpha: 0, filter: "blur(12px)" }, { scale: 1, autoAlpha: 1, filter: "blur(0px)", duration: 0.12, ease: "back.out(2.2)" }, 2.42);
       tl.fromTo(".verdict-note", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.1 }, 2.54);
       // 2 -> 3 twin
-      morph(3, 2.7, { x: 0.95, rotY: -0.5, alert: 0, organs: 1.45, camZ: 4.3 });
+      morph(3, 2.7, { x: 0.95, rotY: -0.5, alert: 0, organs: 1.05, camZ: 4.3 });
       scene(3);
       tl.from(".sc-3 .rv", { y: 24, opacity: 0, stagger: 0.05, duration: 0.16 }, 2.92);
       tl.from(".co", { x: -22, opacity: 0, stagger: 0.07, duration: 0.14 }, 3.14);
