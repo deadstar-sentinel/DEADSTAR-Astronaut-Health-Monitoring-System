@@ -100,29 +100,65 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           DRAG: ORBIT · SCROLL: ZOOM · RIGHT-DRAG: PAN · DBL-CLICK: FOCUS
         </div>
 
-        {/* Floating holographic 3D-projected anatomical labels */}
-        {ready && state.display.showLabels && (
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            {labels
-              .filter((lbl) => lbl.visible)
-              .map((lbl) => (
+        {/* Callout labels: pushed out to the side of the body with leader lines, never overlapping */}
+        {ready && state.display.showLabels && (() => {
+          const W = mountRef.current?.clientWidth ?? 800;
+          const ROW = 26;
+          const placed: (LabelProjection & { side: number; lx: number; ly: number })[] = [];
+          for (const side of [-1, 1]) {
+            const group = labels
+              .filter((l) => l.visible && (l.x < W / 2 ? -1 : 1) === side)
+              .sort((p, q) => p.y - q.y);
+            let last = -Infinity;
+            for (const l of group) {
+              const ly = Math.max(l.y, last + ROW);
+              last = ly;
+              const lx = Math.min(Math.max(l.x + side * 64, 8), W - 8);
+              placed.push({ ...l, side, lx, ly });
+            }
+          }
+          return (
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+              <svg className="absolute inset-0 w-full h-full" aria-hidden="true">
+                {placed.map((l) => (
+                  <g key={l.id}>
+                    <polyline
+                      points={`${l.x},${l.y} ${l.lx - l.side * 10},${l.ly} ${l.lx},${l.ly}`}
+                      fill="none"
+                      stroke={l.selected ? "rgba(103,232,249,0.95)" : "rgba(103,232,249,0.45)"}
+                      strokeWidth={l.selected ? 1.5 : 1}
+                    />
+                    <circle cx={l.x} cy={l.y} r={l.selected ? 3.5 : 2.5} fill="#22d3ee" />
+                  </g>
+                ))}
+              </svg>
+              {placed.map((l) => (
                 <button
-                  key={lbl.id}
+                  key={l.id}
                   type="button"
-                  onClick={() => onSelectOrgan(lbl.id, true)}
+                  onClick={() => onSelectOrgan(l.id, true)}
+                  title={`Open ${l.name} forecast`}
                   style={{
-                    transform: `translate(${lbl.x}px, ${lbl.y}px) translate(-50%, -50%)`,
+                    transform: `translate(${l.lx}px, ${l.ly}px) translate(${l.side < 0 ? "-100%" : "0"}, -50%)`,
                   }}
-                  className={`pointer-events-auto absolute top-0 left-0 px-2 py-0.5 text-[10px] font-mono tracking-wider uppercase border transition-colors ${
-                    lbl.selected
-                      ? "bg-[#061830]/95 border-cyan-300 text-cyan-200 shadow-[0_0_12px_rgba(0,229,255,0.35)]"
-                      : "bg-[#040d1c]/85 border-cyan-400/35 text-cyan-100/90 hover:border-cyan-300 hover:text-white"
+                  className={`pointer-events-auto cursor-pointer absolute top-0 left-0 px-2 py-1 text-[11px] font-mono tracking-wider uppercase border rounded-sm transition-all duration-150 ${
+                    l.selected
+                      ? "bg-cyan-400/20 border-cyan-200 text-white shadow-[0_0_14px_rgba(0,229,255,0.45)]"
+                      : "bg-[#040d1c]/90 border-cyan-400/40 text-cyan-100 hover:bg-cyan-400/15 hover:border-cyan-200 hover:text-white hover:scale-105"
                   }`}
                 >
-                  <span className="inline-block w-1.5 h-1.5 bg-cyan-400 mr-1.5 align-middle" />
-                  {lbl.name}
+                  {l.name}
+                  <span className="ml-1.5 text-cyan-300/70">›</span>
                 </button>
               ))}
+            </div>
+          );
+        })()}
+
+        {/* First-run hint so it is obvious what is clickable */}
+        {ready && !state.selectedOrganId && (
+          <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full border border-cyan-300/40 bg-[#040d1c]/85 text-[11px] font-mono tracking-wider text-cyan-100 animate-pulse">
+            TAP ANY ORGAN OR LABEL FOR ITS FORECAST
           </div>
         )}
 

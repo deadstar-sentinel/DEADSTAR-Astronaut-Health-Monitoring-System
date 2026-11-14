@@ -12,6 +12,7 @@ import {
   getSelectedStructure,
   type SimulationState,
 } from "../utils/simulationState.ts";
+import { ForecastCard } from "./ForecastCard.tsx";
 
 interface RightInspectorPanelProps {
   state: SimulationState;
@@ -186,6 +187,8 @@ export function RightInspectorPanel({
                 Zoom Focus
               </button>
             </div>
+
+            <ForecastCard organId={selected.id} />
 
             {/* Anatomical Metadata */}
             <div className="space-y-2.5 text-xs">

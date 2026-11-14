@@ -99,6 +99,7 @@ export class MedicalViewportController {
   private skinXrayMat: THREE.ShaderMaterial;
   private skinRealisticMat: THREE.MeshPhysicalMaterial;
   private fxHoloMat: THREE.ShaderMaterial;
+  private platformMat: THREE.ShaderMaterial;
   private beamMat: THREE.ShaderMaterial;
   private muscleTextures: { map: THREE.CanvasTexture; bumpMap: THREE.CanvasTexture };
   private entryMats = new Map<AnatomyMeshEntry, EntryMaterials>();
@@ -266,7 +267,9 @@ export class MedicalViewportController {
     });
 
     this.fxHoloMat = createOrganHoloMaterial("#00E5FF", "#008CFF");
-    this.fxHoloMat.uniforms.uOpacity.value = 0.65;
+    this.fxHoloMat.uniforms.uOpacity.value = 0.55;
+    this.platformMat = createOrganHoloMaterial("#00E5FF", "#008CFF");
+    this.platformMat.uniforms.uOpacity.value = 0.22;
 
     this.beamMat = new THREE.ShaderMaterial({
       uniforms: {
@@ -320,6 +323,8 @@ export class MedicalViewportController {
         if (!(obj instanceof THREE.Mesh)) return;
         if (obj.name === "FX_beam") {
           obj.material = this.beamMat;
+        } else if (obj.name === "FX_platform") {
+          obj.material = this.platformMat; // dimmer: the solid disc was blowing out under bloom
         } else if (obj.name.startsWith("FX_")) {
           obj.material = this.fxHoloMat;
         }
@@ -827,6 +832,7 @@ export class MedicalViewportController {
     this.skinThermalMat.uniforms.uTime.value = t;
     this.skinXrayMat.uniforms.uTime.value = t;
     this.fxHoloMat.uniforms.uTime.value = t;
+    this.platformMat.uniforms.uTime.value = t;
     this.beamMat.uniforms.uTime.value = t;
 
     if (this.twin?.surfaceParticleMat) {
@@ -986,6 +992,7 @@ export class MedicalViewportController {
     this.skinXrayMat.dispose();
     this.skinRealisticMat.dispose();
     this.fxHoloMat.dispose();
+    this.platformMat.dispose();
     this.beamMat.dispose();
     this.muscleTextures.map.dispose();
     this.muscleTextures.bumpMap.dispose();

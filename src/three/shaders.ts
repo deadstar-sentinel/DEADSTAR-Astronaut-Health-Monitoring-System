@@ -343,7 +343,7 @@ export function createPathwayPulseMaterial(
         float packet = exp(-pow((flow - 0.5) * 7.5, 2.0));
         float dimFactor = mix(1.0, 0.18, uDimmed);
         float boost = 1.0 + uHighlight * 0.45;
-        vec3 col = mix(uBase, uPulse, packet * 0.85 + rim * 0.35) * (0.65 + packet * 1.45 + rim * 0.6) * uIntensity * boost * dimFactor;
+        vec3 col = mix(uBase, uPulse, packet * 0.85 + rim * 0.35) * (0.6 + packet * 0.8 + rim * 0.45) * uIntensity * boost * dimFactor;
         float alpha = clamp((0.45 + packet * 0.55 + rim * 0.3) * uOpacity * dimFactor, 0.05, 0.98);
         gl_FragColor = vec4(col, alpha);
       }
