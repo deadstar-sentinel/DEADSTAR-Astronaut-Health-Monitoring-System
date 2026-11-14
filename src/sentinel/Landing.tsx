@@ -140,6 +140,21 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
   const ready = story !== null;
   const title = "SENTINEL";
 
+  // Hero plays immediately on load — it never waits for data.
+  useLayoutEffect(() => {
+    const sc = scroller.current;
+    if (!sc || !root.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const ctx = gsap.context(() => {
+      gsap.from(".ch", { yPercent: 110, opacity: 0, filter: "blur(14px)", duration: 1.3, stagger: 0.06, ease: "expo.out", delay: 0.1 });
+      gsap.from(".hero-sub", { y: 24, opacity: 0, duration: 1.1, stagger: 0.12, delay: 0.6, ease: "power3.out" });
+      gsap.fromTo(".hero-bg", { scale: 1.18, opacity: 0 }, { scale: 1.02, opacity: 0.62, duration: 2.6, ease: "power2.out" });
+      gsap.to(".hero-inner", { yPercent: -35, opacity: 0, ease: "none", scrollTrigger: { scroller: sc, trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
+      gsap.to(".hero-bg", { yPercent: 18, ease: "none", scrollTrigger: { scroller: sc, trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
+    }, root);
+    return () => ctx.revert();
+  }, []);
+
   useLayoutEffect(() => {
     if (!ready || !scroller.current || !root.current) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -154,12 +169,6 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       };
       if (reduce) return;
 
-      // Hero: title rises out of blur, render breathes in, everything lifts away on scroll.
-      gsap.from(".ch", { yPercent: 110, opacity: 0, filter: "blur(14px)", duration: 1.3, stagger: 0.06, ease: "expo.out", delay: 0.15 });
-      gsap.from(".hero-sub", { y: 24, opacity: 0, duration: 1.1, stagger: 0.12, delay: 0.75, ease: "power3.out" });
-      gsap.fromTo(".hero-bg", { scale: 1.18, opacity: 0 }, { scale: 1.02, opacity: 0.62, duration: 2.6, ease: "power2.out" });
-      gsap.to(".hero-inner", { yPercent: -35, opacity: 0, ease: "none", scrollTrigger: { trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
-      gsap.to(".hero-bg", { yPercent: 18, ease: "none", scrollTrigger: { trigger: ".s-hero", start: "top top", end: "bottom top", scrub: true } });
 
       // 01 Distance: a photon crosses to Earth and back; the clock runs with your scroll.
       const owlt = live.current.owltMin;
@@ -172,7 +181,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
           if (leg) leg.textContent = "Crew → Earth";
         } })
         .to(".dist-earth", { boxShadow: "0 0 60px 18px rgba(56,189,248,0.75)", duration: 0.1 })
-        .fromTo(".photon", { left: "100%" }, { left: "0%", duration: 1, ease: "none", onUpdate(this: gsap.core.Tween) {
+        .fromTo(".photon", { left: "100%" }, { left: "0%", duration: 1, ease: "none", immediateRender: false, onUpdate(this: gsap.core.Tween) {
           if (clock) clock.textContent = (owlt + this.progress() * owlt).toFixed(1);
           if (leg) leg.textContent = "Earth → Crew";
         } })
