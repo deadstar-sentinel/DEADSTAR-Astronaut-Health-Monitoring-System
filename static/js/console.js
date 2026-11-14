@@ -476,9 +476,10 @@ function drawWI(r) {
     card("p_sans", "P(ONSD ≥ 6 mm, SANS)", 0, true) + card("dose_pct", "Dose, % career limit", 1) + card("alertness", "Alertness vs rested", 0) + card("pvt", "Reaction time", 0);
   const s = r.series;
   lineChart($("#wiChart"), [
-    { name: "Hip BMD — plan as flown", xs: s.t, ys: s.bmd_base, color: "#8fa3b5", dash: "4 4" },
-    { name: "Hip BMD — with countermeasures", xs: s.t, ys: s.bmd_new, color: "#5ce1e6" },
+    { name: "Plan as flown", xs: s.t, ys: s.bmd_base, color: "#8fa3b5", dash: "4 4" },
+    { name: "Countermeasures", xs: s.t, ys: s.bmd_new, color: "#5ce1e6" },
   ], { height: 200, yDec: 1, unit: "%", xLabel: t => `+${Math.round(t)} d`, legendRight: true, refs: [{ y: 90, label: "−10 %" }] });
+  $("#wiChart svg")?.setAttribute("aria-label", "Hip bone density to mission end, plan as flown vs with countermeasures");
   $("#wiAssump").innerHTML = r.assumptions.map(a => `<li>${esc(a)}</li>`).join("");
 }
 
@@ -544,8 +545,8 @@ async function renderReady() {
   if (!S.detail) return;
   const t = S.detail.task;
   lineChart($("#readyChart"), [
-    { name: "Predicted alertness", xs: t.t, ys: t.alertness, color: "#5ce1e6" },
-    { name: "Well-rested reference", xs: t.t, ys: t.reference, color: "#8fa3b5", dash: "4 4" },
+    { name: "Predicted", xs: t.t, ys: t.alertness, color: "#5ce1e6" },
+    { name: "Rested ref.", xs: t.t, ys: t.reference, color: "#8fa3b5", dash: "4 4" },
   ], { height: 230, yDec: 0, unit: "", yMin: 0, yMax: 100, nowX: 0, spans: t.sleep, legendRight: true, xLabel: x => x === 0 ? "now" : `${x > 0 ? "+" : "−"}${Math.abs(Math.round(x))}h`,
     refs: [{ y: t.task_alertness, label: `09:00 task: ${Math.round(t.task_relative)} % of rested`, color: "var(--watch)", textColor: "#f0b660" }] });
   const rows = S.st.crew.map(c => `<tr><td>${esc(c.name)}</td><td class="r">${fmt(c.task.sleep_debt_3n, 1)} h</td><td class="r">${Math.round(c.task.task_relative)} %</td><td>${c.task.task_relative >= 78 ? '<span class="chip nominal">GO</span>' : c.task.task_relative >= 70 ? '<span class="chip watch">GO WITH CAUTION</span>' : '<span class="chip act">NO-GO</span>'}</td></tr>`).join("");
