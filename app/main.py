@@ -23,6 +23,7 @@ STATIC = ROOT / "static"
 app = FastAPI(title="DEADSTAR SENTINEL", version="1.0")
 app.add_middleware(GZipMiddleware, minimum_size=1200)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/models", StaticFiles(directory=ROOT / "public" / "models"), name="models")  # Blender twin
 
 LOCK = threading.Lock()
 SERVER = {
@@ -92,6 +93,12 @@ def astronaut_page():
 @app.get("/holo")
 def holo_page():
     return FileResponse(STATIC / "holo.html")
+
+
+@app.get("/twin")
+def twin_page():
+    """Blender hologram twin (same page AI Studio previews from the repo root)."""
+    return FileResponse(ROOT / "index.html")
 
 
 @app.get("/health")
