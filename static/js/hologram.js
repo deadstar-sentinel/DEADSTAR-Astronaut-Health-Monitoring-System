@@ -11,6 +11,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const STATUS = { nominal: new THREE.Color("#3a8de8"), watch: new THREE.Color("#e0901c"), act: new THREE.Color("#e05cc6") };
 const CYAN = new THREE.Color("#5ce1e6");
@@ -63,7 +67,7 @@ export function createHologram(canvas, opts = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0x000000, 0);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+  renderer.toneMapping = THREE.NoToneMapping; renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
   const HOME = { pos: new THREE.Vector3(0.35, 1.2, 4.35), target: new THREE.Vector3(0, 0.97, 0) };
@@ -85,6 +89,21 @@ export function createHologram(canvas, opts = {}) {
 
   const root = new THREE.Group(); scene.add(root);
   const glowTex = glowTexture();
+
+  // bloom: needs an opaque background, so the stage gradient is drawn into the scene
+  let composer = null, bloom = null;
+  if (!opts.quad && opts.bloom !== false) {
+    const bc = document.createElement("canvas"); bc.width = 64; bc.height = 256;
+    const bg = bc.getContext("2d"); const gr = bg.createLinearGradient(0, 0, 0, 256);
+    gr.addColorStop(0, "#05080d"); gr.addColorStop(0.55, "#071019"); gr.addColorStop(1, "#0a1a22");
+    bg.fillStyle = gr; bg.fillRect(0, 0, 64, 256);
+    const bt = new THREE.CanvasTexture(bc); bt.colorSpace = THREE.SRGBColorSpace; scene.background = bt;
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.42, 0.38, 0.32);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+  }
 
   /* projector base */
   const base = new THREE.Group(); root.add(base);
@@ -116,7 +135,7 @@ export function createHologram(canvas, opts = {}) {
   let mode = { view: opts.view || "hologram", suit: false };
   let hr = 62, progress = 1, boneLoss = 0.06, focus = null, hovered = null, radScore = 0, organMap = {};
   let bodyRoot = null, mixer = null, suit = null;
-  const bodyHolo = holoMat(CYAN, 1), bodyX = holoMat(new THREE.Color("#8fd8ff"), 0.4, 0.4), bodyInSuit = holoMat(CYAN, 0.25, 0.2);
+  const bodyHolo = holoMat(CYAN, 0.75), bodyX = holoMat(new THREE.Color("#8fd8ff"), 0.3, 0.3), bodyInSuit = holoMat(CYAN, 0.25, 0.2);
   const bodyReal = new THREE.MeshPhysicalMaterial({ color: 0x24427a, roughness: 0.7, metalness: 0, sheen: 0.6, sheenColor: new THREE.Color(0x8fb4ff) });
   const bodyRealJoint = new THREE.MeshPhysicalMaterial({ color: 0x131f38, roughness: 0.8 });
   const boneMat = glowMat(BONE_WHITE, 0.35);
@@ -306,6 +325,8 @@ export function createHologram(canvas, opts = {}) {
     for (const o of Object.values(organs)) { o.meshes.forEach(m => m.visible = showOrgans); o.sprites.forEach(s => s.visible = showOrgans); }
     cone.visible = v !== "realistic"; scanRing.visible = v !== "realistic";
     const L = v === "realistic" ? 1 : 0;
+    renderer.toneMapping = L ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    if (bloom) { bloom.strength = v === "realistic" ? 0.08 : v === "xray" ? 0.5 : 0.42; bloom.threshold = v === "realistic" ? 0.85 : 0.32; }
     hemi.intensity = 1.25 * L; key.intensity = 2.2 * L; rim.intensity = 1.1 * L; fill.intensity = 0.7 * L;
     setOrgans(organMap);
   }
@@ -315,7 +336,7 @@ export function createHologram(canvas, opts = {}) {
     const v = mode.view;
     for (const [k, val] of Object.entries(organMap)) {
       const o = organs[k]; if (!o) continue;
-      o.band = val.band; o.score = val.score;
+      o.band = val.band; o.score = val.score; o.driver = val.driver; o.risk = val.risk;
       const c = STATUS[val.band] || STATUS.nominal, isBone = BONES_KEYS.has(k);
       o.meshes.forEach(m => {
         if (isBone && val.band === "nominal") { m.material.color.copy(BONE_WHITE); m.userData.baseOp = v === "xray" ? 0.85 : 0.22; }
@@ -360,29 +381,59 @@ export function createHologram(canvas, opts = {}) {
     canvas.addEventListener("pointerleave", () => { hovered = null; });
   }
 
-  /* labels */
+  /* callouts with leader lines */
   const labelsEl = opts.labelsEl, labelNodes = {};
-  if (labelsEl) for (const k of Object.keys(REGION_LABEL)) {
-    const d = document.createElement("div"); d.className = "olabel hide";
-    d.addEventListener("click", () => { setFocus(k); opts.onRegion && opts.onRegion(k); });
-    labelsEl.appendChild(d); labelNodes[k] = d;
+  let svgLines = null;
+  if (labelsEl) {
+    svgLines = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svgLines.setAttribute("class", "callout-lines"); labelsEl.appendChild(svgLines);
+    for (const k of Object.keys(REGION_LABEL)) {
+      const d = document.createElement("div"); d.className = "callout hide";
+      d.innerHTML = `<div class="c-name"></div><div class="c-drv"></div>`;
+      d.addEventListener("click", () => { setFocus(k); opts.onRegion && opts.onRegion(k); });
+      labelsEl.appendChild(d); labelNodes[k] = d;
+    }
   }
-  const v3 = new THREE.Vector3();
+  const v3 = new THREE.Vector3(), c3 = new THREE.Vector3();
   function updateLabels() {
     if (!labelsEl) return;
     const w = canvas.clientWidth, h = canvas.clientHeight;
+    c3.set(0, 1, 0); root.localToWorld(c3); c3.project(camera);
+    const cx = (c3.x + 1) / 2 * w;
+    const colOff = Math.min(w * 0.17, 150);
+    const items = [];
     for (const [k, n] of Object.entries(labelNodes)) {
       const o = organs[k];
-      if (!o || (!o.anchorObj && !o.anchorPos)) { n.classList.add("hide"); continue; }
-      const show = mode.view === "realistic" ? o.band === "act" : (o.band !== "nominal" || hovered === k || focus === k);
+      const ok = o && (o.anchorObj || o.anchorPos);
+      const show = ok && (mode.view === "realistic" ? o.band === "act" : (o.band !== "nominal" || hovered === k || focus === k));
       if (!show) { n.classList.add("hide"); continue; }
       if (o.anchorObj) o.anchorObj.getWorldPosition(v3); else { v3.copy(o.anchorPos); root.localToWorld(v3); }
       v3.project(camera);
       if (v3.z > 1) { n.classList.add("hide"); continue; }
-      n.className = `olabel ${o.band}`;
-      n.style.left = ((v3.x + 1) / 2 * w) + "px"; n.style.top = ((1 - v3.y) / 2 * h) + "px";
-      n.textContent = `${REGION_LABEL[k] || k} ${Math.round(o.score)}`;
+      const px = (v3.x + 1) / 2 * w, py = (1 - v3.y) / 2 * h;
+      items.push({ k, n, o, px, py, side: 1 });
     }
+    let paths = "";
+    for (const side of [-1, 1]) {
+      const col = items.filter(i => i.side === side).sort((a, b) => a.py - b.py);
+      let yPrev = 118;
+      for (const it of col) {
+        const ly = Math.min(h - 70, Math.max(yPrev + 44, it.py, 162));
+        yPrev = ly;
+        const lx = cx + side * colOff;
+        const n = it.n;
+        n.className = `callout ${it.o.band} ${side < 0 ? "left" : "right"}`;
+        n.style.left = lx + "px"; n.style.top = ly + "px";
+        n.firstChild.textContent = `${REGION_LABEL[it.k] || it.k} · ${Math.round(it.o.score)}`;
+        n.lastChild.textContent = it.o.driver || it.o.risk || "";
+        const col2 = it.o.band === "act" ? "#f19ae0" : it.o.band === "watch" ? "#f0b660" : "#8fbdf2";
+        const ex = lx - side * 16;
+        paths += `<path d="M${it.px.toFixed(1)},${it.py.toFixed(1)} L${ex.toFixed(1)},${ly.toFixed(1)} L${lx.toFixed(1)},${ly.toFixed(1)}" stroke="${col2}" />` +
+          `<circle cx="${it.px.toFixed(1)}" cy="${it.py.toFixed(1)}" r="2.6" fill="${col2}" />`;
+      }
+    }
+    svgLines.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svgLines.innerHTML = paths;
   }
 
   function resize() {
@@ -390,6 +441,7 @@ export function createHologram(canvas, opts = {}) {
     const w = canvas.clientWidth || el.clientWidth, h = canvas.clientHeight || el.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (composer) { composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); composer.setSize(w, h); }
   }
   const ro = new ResizeObserver(resize); ro.observe(canvas.parentElement || canvas); resize();
 
@@ -468,7 +520,7 @@ export function createHologram(canvas, opts = {}) {
       if (k >= 1) tween.active = false;
     }
     if (controls) { controls.autoRotate = (opts.autoRotate !== false) && !focus && !tween.active && performance.now() - userTouched > 6000; controls.update(); }
-    renderer.render(scene, camera);
+    if (composer) composer.render(); else renderer.render(scene, camera);
     updateLabels();
   }
   frame();

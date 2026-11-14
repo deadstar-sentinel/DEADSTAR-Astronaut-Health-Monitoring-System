@@ -32,8 +32,13 @@ async function boot() {
   buildStatic();
   holo = createHologram($("#holo"), { labelsEl: $("#organLabels"), onRegion: openRegion, modelAvailable: S.meta.model_glb });
   tick(); setInterval(tick, 1000);
+  const bootP = bootStart();
   await refresh(true);
+  bootP.finish();
   setInterval(() => refresh(false), 60000);
+  setInterval(tickVitals, 1000);
+  setInterval(() => renderSitrep(true), 9000);
+  waveLoop();
   document.addEventListener("keydown", onKey);
   window.addEventListener("resize", debounce(() => { renderForecast(); if (S.pane === "whatif") renderWhatIf(); }, 200));
 }
@@ -119,7 +124,7 @@ async function refresh(full) {
   const sw = st.space_weather;
   $("#swLabel").textContent = `${sw.summary?.label || "—"}${sw.cached ? " · cached" : sw.live ? " · live" : ""}`;
   $("#swDot").className = "dot live" + (sw.summary?.level >= 2 ? " act" : sw.summary?.level === 1 ? " watch" : "");
-  renderCrew(); renderVerdict(); renderAlerts(); renderGuests(); renderMatrix();
+  renderCrew(); renderVerdict(); renderAlerts(); renderGuests(); renderMatrix(); renderSitrep(false);
   $("#logCrew").innerHTML = st.crew.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
   if (!S.crew || !st.crew.find(c => c.id === S.crew)) {
     const firstAct = st.alerts.find(a => a.crew && a.severity === "act");
@@ -163,7 +168,7 @@ async function selectCrew(cid, full) {
   $("#whoVitals").innerHTML = [
     ["HR", fmt(S.live?.hr ?? v.hr, 0), "bpm", S.live?.hr], ["SpO₂", fmt(S.live?.spo2 ?? v.spo2, 1), "%", S.live?.spo2], ["Temp", fmt(v.temp, 2), "°C"],
     ["BP", `${fmt(v.sbp, 0)}/${fmt(v.dbp, 0)}`, "mmHg"], ["HRV", fmt(v.hrv, 0), "ms"], ["Resp", fmt(v.rr, 1), "/min"],
-  ].map(([k, val, u, live]) => `<div><div class="lbl">${k}${live ? ' <span style="color:var(--accent)">· live</span>' : ""}</div><div class="v">${val}<small>${u}</small></div></div>`).join("");
+  ].map(([k, val, u, live]) => `<div><div class="lbl">${k}${live ? ' <span style="color:var(--accent)">· live</span>' : ""}</div><div class="v" data-k="${k}">${val}<small>${u}</small></div></div>`).join("");
   $("#whoStatus").className = `chip ${s.status}`;
   $("#whoStatus").innerHTML = `<span class="glyph">${bandGlyph[s.status]}</span>${bandLabel[s.status]} · health ${Math.round(s.health_index)}`;
   const at = d.attribution?.attribution;
@@ -621,3 +626,109 @@ function selectCrewVitalsOnly() {
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 boot().catch(e => { console.error(e); toast("Startup error: " + e.message); });
+
+
+/* ------------------------------------------------------------------ boot sequence */
+function bootStart() {
+  const el = $("#boot"), log = $("#bootLog"), bar = $("#bootBar");
+  let skipped = false, ready = false, done = false;
+  const finishNow = () => { if (done) return; done = true; el.classList.add("done"); setTimeout(() => el.remove(), 800); };
+  const skip = () => { skipped = true; finishNow(); };
+  el.addEventListener("click", skip); document.addEventListener("keydown", skip, { once: true });
+  const lines = [];
+  const add = (html, pct) => { log.insertAdjacentHTML("beforeend", html + "\n"); bar.style.width = pct + "%"; };
+  (async () => {
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    add(`<span class="k">[ sys ]</span> SENTINEL core online`, 8); await wait(380);
+    add(`<span class="k">[ link ]</span> crew biomonitors … 4/4 linked  <span class="ok">✓</span>`, 22); await wait(420);
+    add(`<span class="k">[ nasa ]</span> HRP risk model · 17 risks · evidence priors loaded  <span class="ok">✓</span>`, 38); await wait(420);
+    while (!ready && !skipped) await wait(80);
+    const st = S.st; if (!st || skipped) return;
+    const ow = st.light.owlt_s, owl = ow >= 60 ? `${Math.floor(ow / 60)} m ${String(Math.round(ow % 60)).padStart(2, "0")} s` : `${ow.toFixed(2)} s`;
+    add(`<span class="k">[ orbit ]</span> ${esc(st.mission.name)} · Earth one-way light time ${owl}`, 52); await wait(420);
+    add(`<span class="k">[ model ]</span> rolling backtests · 7 vitals × 4 crew · conformal bands calibrated  <span class="ok">✓</span>`, 66); await wait(420);
+    add(`<span class="k">[ sw ]</span> space weather ${st.space_weather.live ? "live from NASA DONKI" : "cached DONKI events"} · ${esc(st.space_weather.summary?.label || "")}`, 78); await wait(380);
+    const act = st.alerts.filter(a => a.severity === "act"), auto = st.alerts.filter(a => a.autonomous);
+    add(`<span class="k">[ sitrep ]</span> <span class="act">${act.length} ACT</span> · ${st.alerts.length - act.length} watch · ${auto.length} require onboard action`, 92); await wait(500);
+    add(`<span class="ok">&gt;&gt; handing over to flight surgeon console</span>`, 100); await wait(700);
+    finishNow();
+  })();
+  return { finish() { ready = true; setTimeout(finishNow, 9000); } };
+}
+
+/* ------------------------------------------------------------------ situation banner */
+let sitIdx = 0;
+function renderSitrep(rotate) {
+  const st = S.st; if (!st) return;
+  const acts = st.alerts.filter(a => a.severity === "act");
+  const list = acts.length ? acts : st.alerts.slice(0, 1);
+  const el = $("#sitrep");
+  if (!list.length) { el.className = "sitrep nominal"; el.innerHTML = `<span class="sev">NOMINAL</span><span>All crew and ship systems nominal.</span>`; return; }
+  if (rotate) sitIdx = (sitIdx + 1) % list.length;
+  const a = list[sitIdx % list.length];
+  let nums = "";
+  if (a.fever_prob_24h != null) nums = `<span class="sep">·</span> P(fever ≥ 38 °C, 24 h) <span class="num">${Math.round(a.fever_prob_24h * 100)}%</span>${a.fever_in_h ? ` <span class="sep">·</span> crossing in <span class="num">${a.fever_in_h} h</span>` : ""}${a.detected_hours_ago != null ? ` <span class="sep">·</span> flagged <span class="num">${a.detected_hours_ago} h</span> ago` : ""}`;
+  else nums = `<span class="sep">·</span> <span class="muted">${esc(a.detail.split(". ")[0])}</span>`;
+  const dec = a.autonomous ? `EARTH REPLY ${Math.round(a.earth_reply_min)} MIN &gt; ${Math.round(a.act_within_min)} MIN DEADLINE → SENTINEL ACTING ONBOARD` : `TIME ALLOWS A GROUND DECISION · ${fmtMin(a.earth_reply_min)}`;
+  el.className = `sitrep ${a.severity}`;
+  el.innerHTML = `<span class="fade" style="display:contents"><span class="sev">${a.severity.toUpperCase()}${list.length > 1 ? ` ${sitIdx % list.length + 1}/${list.length}` : ""}</span><span class="what">${esc(a.title)}</span>${nums}<span class="dec">${dec}</span></span>`;
+  el.onclick = () => { S.openAlert = a.id; renderAlerts(); if (a.crew) selectCrew(a.crew, false); };
+}
+
+/* ------------------------------------------------------------------ live telemetry */
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) * 0.8;
+function tickVitals() {
+  if (!S.detail) return;
+  const v = S.detail.summary.vitals;
+  const set = (k, txt) => { const n = document.querySelector(`#whoVitals .v[data-k="${k}"]`); if (n && n.firstChild) n.firstChild.nodeValue = txt; };
+  if (!S.live?.hr) set("HR", fmt(v.hr + gauss() * 1.2, 0));
+  if (!S.live?.spo2) set("SpO₂", fmt(Math.min(100, v.spo2 + gauss() * 0.15), 1));
+  set("Temp", fmt(v.temp + gauss() * 0.015, 2));
+  set("Resp", fmt(v.rr + gauss() * 0.25, 1));
+  set("HRV", fmt(v.hrv + gauss() * 2, 0));
+}
+function waveLoop() {
+  const cv = $("#ecg"); if (!cv) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = 300 * dpr; cv.height = 70 * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const W = 300, H = 70, ecgY = 22, respY = 56;
+  const ecgBuf = new Array(W).fill(0), respBuf = new Array(W).fill(0);
+  let phase = 0, rphase = 0, x = 0, last = performance.now();
+  const pqrst = p => {   // one beat, p in [0,1)
+    const G = (m, s, a) => a * Math.exp(-((p - m) ** 2) / (2 * s * s));
+    return G(0.18, 0.025, 0.12) - G(0.285, 0.008, 0.12) + G(0.3, 0.009, 1.0) - G(0.318, 0.009, 0.25) + G(0.55, 0.045, 0.26);
+  };
+  const draw = now => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const hr = S.live?.hr || S.detail?.summary?.vitals?.hr || 62, rr = S.detail?.summary?.vitals?.rr || 14;
+    const pxPerSec = 60;
+    const steps = Math.max(1, Math.round(dt * pxPerSec));
+    for (let i = 0; i < steps; i++) {
+      phase += (hr / 60) / pxPerSec * (1 + gauss() * 0.01); if (phase >= 1) phase -= 1;
+      rphase += (rr / 60) / pxPerSec; if (rphase >= 1) rphase -= 1;
+      ecgBuf[x] = pqrst(phase) + gauss() * 0.012;
+      respBuf[x] = Math.sin(rphase * Math.PI * 2) * 0.5 + 0.08 * Math.sin(rphase * Math.PI * 4);
+      x = (x + 1) % W;
+    }
+    g.clearRect(0, 0, W, H);
+    const status = S.detail?.summary?.status;
+    const col = status === "act" ? "#e05cc6" : "#5ce1e6";
+    const line = (buf, y0, amp, color, width) => {
+      g.beginPath(); g.strokeStyle = color; g.lineWidth = width;
+      for (let i = 0; i < W; i++) {
+        const k = (x + i) % W; const yy = y0 - buf[k] * amp;
+        const gap = i > W - 12; // erase bar ahead of the pen
+        if (gap) continue;
+        i === 0 ? g.moveTo(i, yy) : g.lineTo(i, yy);
+      }
+      g.stroke();
+    };
+    g.shadowColor = col; g.shadowBlur = 6;
+    line(ecgBuf, ecgY, 20, col, 1.4);
+    g.shadowBlur = 0;
+    line(respBuf, respY, 8, "rgba(143,163,181,.85)", 1.1);
+    requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+}

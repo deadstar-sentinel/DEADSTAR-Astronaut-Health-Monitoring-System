@@ -521,8 +521,11 @@ class CrewState:
         organs = {}
         for risk in HRP_RISKS:
             o = risk["organ"]
-            organs[o] = max(organs.get(o, 0), r[risk["id"]]["score"])
-        return {k: {"score": round(v, 1), "band": band(v)} for k, v in organs.items()}
+            sc = r[risk["id"]]["score"]
+            if o not in organs or sc > organs[o]["score"]:
+                organs[o] = {"score": sc, "risk": risk["name"], "driver": (r[risk["id"]]["drivers"] or [""])[0]}
+        return {k: {"score": round(v["score"], 1), "band": band(v["score"]), "risk": v["risk"], "driver": v["driver"]}
+                for k, v in organs.items()}
 
     def env_summary(self):
         e = self.env

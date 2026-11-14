@@ -41,6 +41,7 @@
   </nav>
 </header>
 
+<div class="sitrep" id="sitrep" aria-live="polite"></div>
 <main class="shell">
   <!-- LEFT: crew + ship vs body -->
   <section class="col">
@@ -74,13 +75,13 @@
           <div class="who" id="whoName">—</div>
           <div class="role" id="whoRole">—</div>
           <div class="vit" id="whoVitals"></div>
+          <div class="wave"><canvas id="ecg"></canvas><div class="wave-k"><span>ECG II</span><span>RESP</span></div></div>
         </div>
         <div class="hud-tr">
           <div class="seg" id="viewSeg"><button data-v="hologram" class="on">HOLOGRAM</button><button data-v="realistic">REALISTIC</button><button data-v="xray">X-RAY</button></div>
           <div class="seg" id="wearSeg"><button data-w="cabin" class="on">CABIN</button><button data-w="suit">EVA SUIT · Z2</button></div>
           <span class="chip" id="whoStatus">—</span>
           <span class="chip" id="whoAttr" style="display:none"></span>
-          <span class="lbl" style="margin-top:6px">Tap a body region</span>
         </div>
         <div class="hud-bl">
           <div class="lbl" style="margin-bottom:6px">Mission timeline — what space has done to this body</div>
@@ -246,6 +247,14 @@
 
 <div class="modal-back" id="modal"><div class="modal"><div class="modal-head"><h3 id="modalTitle">—</h3><button class="btn sm ghost iconbtn" id="modalClose" aria-label="Close">✕</button></div><div class="modal-body" id="modalBody"></div></div></div>
 <div class="tip" id="tip"></div>
+<div class="boot" id="boot"><div class="boot-in">
+  <svg viewBox="0 0 32 32" width="44" height="44" aria-hidden="true"><circle cx="16" cy="16" r="12.5" fill="none" stroke="#5ce1e6" stroke-width="1.2" stroke-dasharray="58 8 6 6"><animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16" dur="6s" repeatCount="indefinite"/></circle><circle cx="16" cy="16" r="6" fill="none" stroke="#5ce1e6" stroke-width="1" opacity=".55"/><circle cx="16" cy="16" r="2.2" fill="#e6edf3"/></svg>
+  <div class="boot-title">DEADSTAR <span>SENTINEL</span></div>
+  <div class="boot-sub">Autonomous medical officer · predictive crew digital twin</div>
+  <pre class="boot-log" id="bootLog"></pre>
+  <div class="boot-bar"><span id="bootBar"></span></div>
+  <div class="boot-skip">click or press any key to skip</div>
+</div></div>
 <div class="toast" id="toast"></div>
 
 <script src="/static/vendor/qrcode.js"></script>
