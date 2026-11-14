@@ -184,57 +184,127 @@ M_FX = material("MAT_fx", CYAN, 1.5)
 M = {s: material(f"MAT_{s}", CYAN, 1.2) for s in
      ("brain", "eyes", "ear", "heart", "lungs", "spine", "hip", "leg", "gut", "kidney", "lymph")}
 
-# ================================================================ body: muscle-group metaballs -> remesh -> smooth
-B = [E((0, .012, 1.685), (.074, .088, .086)),            # cranium
-     E((0, -.03, 1.605), (.056, .052, .052)),            # face / jaw
-     E((0, -.088, 1.628), (.009, .014, .017)),           # nose
-     E((0, -.068, 1.566), (.024, .02, .017)),            # chin
-     C((0, .008, 1.49), (0, .0, 1.58), .046),            # neck
-     E((0, -.004, 1.355), (.152, .1, .15)),              # rib cage
-     E((0, -.008, 1.17), (.11, .084, .12)),              # abdomen (narrower waist)
-     E((0, .004, .985), (.15, .1, .09))]                 # pelvis
+# ================================================================ body
+# Preferred: a real human from MPFB (MakeHuman for Blender, CC0 output). Fallback: muscle-group metaballs.
+def metaball_body():
+    B = [E((0, .012, 1.685), (.074, .088, .086)),            # cranium
+         E((0, -.03, 1.605), (.056, .052, .052)),            # face / jaw
+         E((0, -.088, 1.628), (.009, .014, .017)),           # nose
+         E((0, -.068, 1.566), (.024, .02, .017)),            # chin
+         E((0, -.072, 1.674), (.048, .012, .012)),           # brow ridge
+         E((0, -.079, 1.585), (.02, .008, .007)),            # lips
+         E((0, -.045, 1.525), (.012, .01, .014)),            # Adam's apple
+         C((0, .008, 1.49), (0, .0, 1.58), .046),            # neck
+         E((0, -.004, 1.355), (.152, .1, .15)),              # rib cage
+         E((0, -.008, 1.17), (.11, .084, .12)),              # abdomen (narrower waist)
+         E((0, .004, .985), (.15, .1, .09))]                 # pelvis
+    for s in (-1, 1):
+        B += [E((s * .075, -.02, 1.648), (.008, .016, .026)),                     # ear
+              E((s * .034, -.074, 1.655), (.016, .012, .012), True),              # eye socket (negative: carves in)
+              E((s * .04, -.062, 1.625), (.018, .014, .014)),                     # cheekbone
+              E((s * .045, -.025, 1.582), (.016, .02, .02)),                      # jaw angle
+              E((s * .09, -.058, 1.475), (.07, .012, .01)),                       # collarbone ridge
+              E((s * .115, .03, 1.3), (.045, .05, .12)),                          # latissimus
+              E((s * .03, .075, 1.15), (.02, .02, .13)),                          # erector spinae
+              E((s * .024, -.086, 1.235), (.02, .009, .022)),                     # abs, upper
+              E((s * .024, -.087, 1.18), (.02, .009, .022)),                      # abs, middle
+              E((s * .024, -.087, 1.125), (.02, .009, .022)),                     # abs, lower
+              C((s * .03, -.02, 1.52), (s * .02, 0, 1.6), .02),                   # sternocleidomastoid
+              C((s * .05, .03, 1.535), (s * .15, .02, 1.475), .034),              # trapezius
+              E((s * .075, -.068, 1.385), (.07, .03, .052)),                      # pectoral
+              E((s * .19, 0, 1.44), (.052, .052, .062)),                          # deltoid
+              E((s * .1, 0, 1.13), (.036, .058, .085)),                           # oblique
+              E((s * .07, .062, .93), (.072, .062, .072)),                        # gluteus
+              # arm: tapered chain shoulder -> elbow -> wrist (no constant-width tubes)
+              E((s * .205, 0, 1.38), (.047, .049, .07)),                          # upper arm (deltoid insertion)
+              E((s * .224, -.004, 1.29), (.043, .045, .07)),                      # biceps / triceps belly
+              E((s * .24, .004, 1.21), (.035, .037, .05)),                        # lower upper arm
+              E((s * .25, .012, 1.165), (.03, .03, .028)),                        # elbow
+              E((s * .258, 0, 1.11), (.039, .036, .062)),                         # forearm, muscular top
+              E((s * .272, -.008, 1.02), (.031, .028, .06)),                      # forearm, middle
+              E((s * .285, -.018, .95), (.023, .02, .04)),                        # forearm, tendons
+              E((s * .29, -.02, .91), (.02, .015, .015)),                         # wrist
+              E((s * .298, -.024, .862), (.012, .036, .04)),                      # palm (spans the fingers)
+              C((s * .29, -.046, .865), (s * .296, -.07, .812), .0095),           # thumb
+              # leg: thigh tapers into a defined knee, calf bulges behind a slim shin
+              E((s * .1, 0, .84), (.083, .086, .1)),                              # upper thigh
+              E((s * .104, -.008, .72), (.07, .073, .09)),                        # mid thigh (quadriceps)
+              E((s * .108, -.012, .6), (.056, .058, .07)),                        # lower thigh
+              E((s * .065, 0, .8), (.03, .045, .07)),                             # adductors
+              E((s * .11, -.016, .5), (.045, .043, .038)),                        # knee
+              E((s * .11, .026, .39), (.05, .054, .085)),                         # calf (gastrocnemius)
+              E((s * .11, -.012, .4), (.038, .033, .09)),                         # shin
+              E((s * .11, .004, .22), (.033, .033, .09)),                         # lower leg
+              E((s * .11, .01, .09), (.027, .027, .028)),                         # ankle
+              E((s * .11, .03, .04), (.03, .035, .03)),                           # heel
+              C((s * .11, .02, .03), (s * .115, -.12, .02), .035),                # foot
+              E((s * .115, -.13, .02), (.035, .02, .015))]                        # toes
+        for f, (length, dy) in enumerate(((.072, -.051), (.082, -.032), (.077, -.013), (.062, .006))):  # fingers, gaps between
+            B.append(C((s * .302, dy, .825), (s * .304, dy - .004, .825 - length), .0075))
+    body = metaballs("Body", B, .006)
+    for kind, args in (("REMESH", {"mode": "VOXEL", "voxel_size": .004}),
+                       ("SMOOTH", {"factor": .6, "iterations": 6})):
+        m = body.modifiers.new(kind, kind)
+        for k, v in args.items():
+            setattr(m, k, v)
+    apply_modifiers(body)
+    return body
+
+
+def mpfb_body():
+    """Realistic adult male from MPFB, scaled to 1.80 m, feet on Z=0, helpers removed."""
+    if not hasattr(bpy.ops, "mpfb") or "create_human" not in dir(bpy.ops.mpfb):
+        return None
+    sc = bpy.context.scene
+    for k, v in (("gender", "male"), ("age", "young"), ("muscle", "maxmuscle"), ("weight", "averageweight"),
+                 ("height", "average"), ("proportions", "max"), ("race", "universal")):
+        setattr(sc, "MPFB_NH_phenotype_" + k, v)
+    sc.MPFB_NH_phenotype_influence = .65
+    for k, v in (("mask_helpers", True), ("detailed_helpers", False), ("add_breast", False), ("load_clothes", False)):
+        if hasattr(sc, "MPFB_NH_" + k):
+            setattr(sc, "MPFB_NH_" + k, v)
+    before = set(bpy.data.objects.keys())
+    bpy.ops.mpfb.create_human()
+    made = [o for o in bpy.data.objects if o.name not in before]
+    human = next((o for o in made if o.type == "MESH"), None)
+    if human is None:
+        return None
+    activate(human)
+    bpy.ops.object.convert(target="MESH")                 # bakes body shape targets and removes masked helpers
+    human = bpy.context.view_layer.objects.active
+    for o in made:
+        if o is not human and o.name in bpy.data.objects:
+            bpy.data.objects.remove(o, do_unlink=True)
+    human.parent = None
+    k = 1.80 / human.dimensions.z
+    human.scale = (k, k, k)
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    zs = [v.co.z for v in human.data.vertices]
+    ys = [v.co.y for v in human.data.vertices if v.co.z > 1.2]          # centre the torso front-to-back
+    for v in human.data.vertices:
+        v.co.z -= min(zs)
+        v.co.y -= (min(ys) + max(ys)) / 2
+    return human
+
+
+body = mpfb_body()
+REALISTIC = body is not None
+if not REALISTIC:
+    body = metaball_body()
+finish(body, "Body", M_SKIN, 60000)
+
+# Arm joints: measured from the realistic mesh (A-pose), or the metaball defaults (arms down).
+SH, EL, WR = {}, {}, {}
 for s in (-1, 1):
-    B += [E((s * .075, -.02, 1.648), (.008, .016, .026)),                     # ear
-          C((s * .03, -.02, 1.52), (s * .02, 0, 1.6), .02),                   # sternocleidomastoid
-          C((s * .05, .03, 1.535), (s * .15, .02, 1.475), .034),              # trapezius
-          E((s * .075, -.068, 1.385), (.07, .03, .052)),                      # pectoral
-          E((s * .19, 0, 1.44), (.052, .052, .062)),                          # deltoid
-          E((s * .1, 0, 1.13), (.036, .058, .085)),                           # oblique
-          E((s * .07, .062, .93), (.072, .062, .072)),                        # gluteus
-          # arm: tapered chain shoulder -> elbow -> wrist (no constant-width tubes)
-          E((s * .205, 0, 1.38), (.047, .049, .07)),                          # upper arm (deltoid insertion)
-          E((s * .224, -.004, 1.29), (.043, .045, .07)),                      # biceps / triceps belly
-          E((s * .24, .004, 1.21), (.035, .037, .05)),                        # lower upper arm
-          E((s * .25, .012, 1.165), (.03, .03, .028)),                        # elbow
-          E((s * .258, 0, 1.11), (.039, .036, .062)),                         # forearm, muscular top
-          E((s * .272, -.008, 1.02), (.031, .028, .06)),                      # forearm, middle
-          E((s * .285, -.018, .95), (.023, .02, .04)),                        # forearm, tendons
-          E((s * .29, -.02, .91), (.02, .015, .015)),                         # wrist
-          E((s * .298, -.026, .862), (.012, .03, .04)),                       # palm
-          C((s * .29, -.046, .865), (s * .296, -.07, .812), .0095),           # thumb
-          # leg: thigh tapers into a defined knee, calf bulges behind a slim shin
-          E((s * .1, 0, .84), (.083, .086, .1)),                              # upper thigh
-          E((s * .104, -.008, .72), (.07, .073, .09)),                        # mid thigh (quadriceps)
-          E((s * .108, -.012, .6), (.056, .058, .07)),                        # lower thigh
-          E((s * .065, 0, .8), (.03, .045, .07)),                             # adductors
-          E((s * .11, -.016, .5), (.045, .043, .038)),                        # knee
-          E((s * .11, .026, .39), (.05, .054, .085)),                         # calf (gastrocnemius)
-          E((s * .11, -.012, .4), (.038, .033, .09)),                         # shin
-          E((s * .11, .004, .22), (.033, .033, .09)),                         # lower leg
-          E((s * .11, .01, .09), (.027, .027, .028)),                         # ankle
-          E((s * .11, .03, .04), (.03, .035, .03)),                           # heel
-          C((s * .11, .02, .03), (s * .115, -.12, .02), .035),                # foot
-          E((s * .115, -.13, .02), (.035, .02, .015))]                        # toes
-    for f, (length, dy) in enumerate(((.072, -.045), (.082, -.03), (.077, -.015), (.062, 0))):  # fingers
-        B.append(C((s * .302, dy, .825), (s * .304, dy - .004, .825 - length), .0085))
-body = metaballs("Body", B, .009)
-for kind, args in (("REMESH", {"mode": "VOXEL", "voxel_size": .005}),
-                   ("SMOOTH", {"factor": .6, "iterations": 6})):
-    m = body.modifiers.new(kind, kind)
-    for k, v in args.items():
-        setattr(m, k, v)
-apply_modifiers(body)
-finish(body, "Body", M_SKIN, 45000)
+    if REALISTIC:
+        mw = body.matrix_world
+        tip = max((mw @ v.co for v in body.data.vertices), key=lambda c: s * c.x)
+        SH[s] = Vector((s * .175, 0, 1.467))
+        d = (tip - SH[s]).normalized()
+        WR[s] = tip - d * .19
+        EL[s] = SH[s] + (WR[s] - SH[s]) * .54
+    else:
+        SH[s], EL[s], WR[s] = Vector((s * .2, 0, 1.43)), Vector((s * .25, .01, 1.165)), Vector((s * .29, -.02, .91))
 
 # ================================================================ skull, brain, eyes, ears
 skull = sphere((0, .012, 1.685), (.068, .082, .08), 48, 24)
@@ -278,8 +348,8 @@ vessels = [tube([(.005, -.04, 1.35), (.005, -.035, 1.42), (-.005, .0, 1.445), (-
            tube([(.03, -.055, 1.395), (-.06, -.02, 1.39)], .007)]
 for s in (-1, 1):
     vessels += [tube([(s * .012, -.02, 1.44), (s * .03, -.03, 1.53), (s * .034, -.025, 1.63)], .0045),              # carotid
-                tube([(s * .02, -.015, 1.44), (s * .12, -.01, 1.45), (s * .2, 0, 1.4), (s * .245, -.02, 1.17),
-                      (s * .28, -.03, .93)], .0042, taper_to=.0025),                                                  # subclavian + brachial
+                tube([(s * .02, -.015, 1.44), (s * .12, -.01, 1.45), tuple(SH[s] + Vector((0, -.02, -.03))),
+                      tuple(EL[s] + Vector((0, -.022, 0))), tuple(WR[s] + Vector((0, -.012, 0)))], .0042, taper_to=.0025),  # subclavian + brachial
                 tube([(-.012, .05, 1.0), (s * .06, .0, .93), (s * .1, -.03, .7), (s * .105, -.02, .5),
                       (s * .11, .0, .3), (s * .11, .0, .1)], .006, taper_to=.0035)]                                   # iliac + femoral
 finish(join(vessels), "ORG_vessels", M["heart"], 9000)
@@ -380,8 +450,9 @@ finish(join(shoulders), "ORG_shoulders", M_BONE, 3000)
 
 arm, leg = [], []
 for s in (-1, 1):
-    arm += [C((s * .2, 0, 1.43), (s * .255, .01, 1.17), .011), C((s * .255, 0, 1.155), (s * .285, -.025, .915), .007),
-            C((s * .268, .02, 1.15), (s * .298, -.01, .91), .0065)]
+    arm += [C(tuple(SH[s]), tuple(EL[s]), .011),                                   # humerus
+            C(tuple(EL[s] + Vector((0, -.006, 0))), tuple(WR[s] + Vector((0, -.006, 0))), .007),   # radius
+            C(tuple(EL[s] + Vector((0, .012, 0))), tuple(WR[s] + Vector((0, .008, 0))), .0065)]    # ulna
     leg += [C((s * .085, 0, .935), (s * .125, 0, .915), .013),                       # femoral neck
             C((s * .12, 0, .915), (s * .11, -.01, .52), .014),                       # femur shaft
             C((s * .11, -.005, .49), (s * .11, .01, .1), .012),                      # tibia
@@ -423,6 +494,7 @@ HOTSPOTS = {
     "HS_ear_L": (.07, 0, 1.645), "HS_ear_R": (-.07, 0, 1.645), "HS_lymph": (.05, -.04, 1.52),
     "HS_heart": (.03, -.07, 1.31), "HS_lungs_L": (.08, -.04, 1.36), "HS_lungs_R": (-.08, -.04, 1.36),
     "HS_spine": (0, .08, 1.20), "HS_gut": (0, -.08, 1.07), "HS_kidney_L": (.058, .07, 1.10), "HS_kidney_R": (-.058, .07, 1.09),
+    "HS_blood": tuple(EL[-1] + Vector((0, -.03, 0))),     # inner elbow: where blood is drawn
     "HS_hip_L": (.10, -.02, .93), "HS_hip_R": (-.10, -.02, .93), "HS_leg_L": (.11, -.05, .50), "HS_leg_R": (-.11, -.05, .50),
 }
 for name, loc in HOTSPOTS.items():
