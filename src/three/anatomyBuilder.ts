@@ -885,6 +885,57 @@ function buildProceduralVenousNetwork(bodyBox: THREE.Box3, parent: THREE.Group):
   return meshes;
 }
 
+const ARM_PART = /delt|biceps|triceps|forearm|brachial|_arm_|ulnar|median|radial/i;
+
+/** Rotate + stretch arm geometry from the authored shoulder->wrist line onto the measured one, per side. */
+function fitArmsToBones(scene: THREE.Object3D, invTwin: THREE.Matrix4, bodyBox: THREE.Box3, meshes: THREE.Mesh[]) {
+  const bones = scene.getObjectByName("ORG_bones_arm") as THREE.Mesh | undefined;
+  if (!bones) return;
+  const toLocal = new THREE.Matrix4().multiplyMatrices(invTwin, bones.matrixWorld);
+  const pos = bones.geometry.getAttribute("position");
+  const v = new THREE.Vector3();
+  const minY = bodyBox.min.y;
+  const h = bodyBox.max.y - bodyBox.min.y;
+  const yAt = (f: number) => minY + h * f;
+  for (const side of [-1, 1]) {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(toLocal);
+      if (side * v.x > 0.02) pts.push(v.clone());
+    }
+    if (pts.length < 10) continue;
+    const sh = pts.reduce((a, b) => (b.y > a.y ? b : a));
+    const wr = pts.reduce((a, b) => (b.distanceToSquared(sh) > a.distanceToSquared(sh) ? b : a));
+    const oldSh = new THREE.Vector2(side * 0.185, yAt(0.79));
+    const oldWr = new THREE.Vector2(side * 0.29, yAt(0.49));
+    const od = oldWr.clone().sub(oldSh);
+    const nd = new THREE.Vector2(wr.x - sh.x, wr.y - sh.y);
+    const rot = Math.atan2(nd.y, nd.x) - Math.atan2(od.y, od.x);
+    const k = nd.length() / od.length();
+    const c = Math.cos(rot) * k;
+    const sn = Math.sin(rot) * k;
+    for (const m of meshes) {
+      if (!ARM_PART.test(m.name)) continue;
+      const g = m.geometry.getAttribute("position");
+      for (let i = 0; i < g.count; i++) {
+        const x = g.getX(i);
+        if (side * x <= 0) continue;
+        const y = g.getY(i);
+        const w = THREE.MathUtils.smoothstep(side * x, 0.12, 0.185); // torso-side ends stay put
+        const dx = x - oldSh.x;
+        const dy = y - oldSh.y;
+        const nx = sh.x + c * dx - sn * dy;
+        const ny = sh.y + sn * dx + c * dy;
+        g.setXY(i, x + (nx - x) * w, y + (ny - y) * w);
+      }
+      g.needsUpdate = true;
+      m.geometry.computeVertexNormals();
+      m.geometry.computeBoundingSphere();
+      m.geometry.computeBoundingBox();
+    }
+  }
+}
+
 export async function loadAndBuildAnatomyTwin(
   isSoftwareGl: boolean,
   onProgress?: (pct: number) => void,
@@ -1022,6 +1073,9 @@ export async function loadAndBuildAnatomyTwin(
 
   const veinMeshes = buildProceduralVenousNetwork(bodyBox, twinGroup);
   registerProcedural(veinMeshes, "circulatory", "vessel");
+
+  // Fit procedural arm parts (authored for an arms-down body) onto the Blender twin's real arm bones.
+  fitArmsToBones(gltf.scene, invTwin, bodyBox, [...muscularMeshes, ...nervousMeshes, ...veinMeshes]);
 
   // Sample holographic surface points on Body mesh
   let surfaceParticles: THREE.Points | null = null;
