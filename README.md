@@ -46,9 +46,12 @@ Fonts and 3D libraries are bundled; only live space weather needs the internet.
 
 Railway auto-detects Python (`railway.json`, `Procfile`). Optional variables: `NASA_API_KEY` (defaults to `DEMO_KEY`), `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `DEFAULT_MISSION` (`mars_transit` · `mars_surface` · `artemis` · `iss`).
 
-## Blender model
+## 3D models
 
-Export an astronaut as `static/models/astronaut.glb` (≤ 5 MB, ~50k triangles). The hologram loads it automatically and keeps the organ markers; without it the built-in procedural body is used.
+- `static/models/z2.glb` — NASA Z2 exploration spacesuit, from [NASA 3D Resources](https://github.com/nasa/NASA-3D-Resources) (textures resized).
+- `static/models/body.glb` — rigged human figure ("X Bot", Mixamo, via the three.js examples). To use a Blender model instead, export a Mixamo-rigged character over this file; the skeleton, organs and tap targets bind to its bones.
+
+Views: Hologram · Realistic · X-ray, each in cabin or in the EVA suit, with suit-vs-cabin telemetry and a decompression-sickness check.
 
 ## Live pulse sensor (optional)
 

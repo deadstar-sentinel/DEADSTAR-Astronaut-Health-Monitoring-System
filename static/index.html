@@ -76,6 +76,8 @@
           <div class="vit" id="whoVitals"></div>
         </div>
         <div class="hud-tr">
+          <div class="seg" id="viewSeg"><button data-v="hologram" class="on">HOLOGRAM</button><button data-v="realistic">REALISTIC</button><button data-v="xray">X-RAY</button></div>
+          <div class="seg" id="wearSeg"><button data-w="cabin" class="on">CABIN</button><button data-w="suit">EVA SUIT · Z2</button></div>
           <span class="chip" id="whoStatus">—</span>
           <span class="chip" id="whoAttr" style="display:none"></span>
           <span class="lbl" style="margin-top:6px">Tap a body region</span>
@@ -89,6 +91,7 @@
           <button class="btn sm" id="serialBtn" title="Connect a pulse sensor over Web Serial (Chrome)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 8h3l1.5-4 3 8L11 8h3"/></svg>Live sensor</button>
         </div>
       </div>
+      <aside class="suit-panel" id="suitPanel"></aside>
       <aside class="drawer" id="drawer" aria-live="polite">
         <div class="drawer-head"><h3 id="drawerTitle">Region</h3><button class="btn sm ghost iconbtn" id="drawerClose" aria-label="Close">✕</button></div>
         <div class="drawer-body" id="drawerBody"></div>

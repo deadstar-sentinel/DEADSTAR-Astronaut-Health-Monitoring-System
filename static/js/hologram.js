@@ -1,366 +1,481 @@
-// Holographic body twin (Three.js).
-// A procedural astronaut rendered with a fresnel/scan-line hologram shader. Organ systems
-// are coloured by live HRP risk, the heart beats at the astronaut's heart rate, and the
-// mission-progress slider morphs the body (fluid shift to the face, leg-volume loss,
-// thinning bone). Drop a Blender export at /static/models/astronaut.glb to replace the
-// procedural body; organs and interaction stay the same.
+// SENTINEL body twin (Three.js).
+//
+// Views:  hologram · realistic · x-ray        Wear:  cabin  ·  NASA Z2 exploration suit (EVA)
+// - Anatomical human (Mixamo "X Bot" rig from the three.js examples) with a live idle animation.
+// - X-ray skeleton (skull, spine, ribcage, pelvis, long bones) and organs bound to the rig's bones,
+//   so they breathe and sway with the body; organs are coloured by live HRP risk.
+// - NASA Z2 spacesuit (NASA 3D Resources) for EVA mode: realistic PBR, holographic or x-ray shell.
+// - Heart beats at the astronaut's heart rate; the mission-day slider morphs the body
+//   (fluid shift to the face, leg-volume and bone loss).
+// - Cinematic fly-in, smooth focus on a tapped organ, orbit / pitch / zoom with damping.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const STATUS = { nominal: new THREE.Color("#3a8de8"), watch: new THREE.Color("#e0901c"), act: new THREE.Color("#e05cc6") };
 const CYAN = new THREE.Color("#5ce1e6");
-
-const holoVert = `
-varying vec3 vN; varying vec3 vV; varying vec3 vW;
-void main(){
-  vec4 w = modelMatrix * vec4(position,1.0);
-  vW = w.xyz;
-  vN = normalize(normalMatrix * normal);
-  vec4 mv = viewMatrix * w;
-  vV = normalize(-mv.xyz);
-  gl_Position = projectionMatrix * mv;
-}`;
-const holoFrag = `
-uniform float uTime; uniform vec3 uColor; uniform float uOpacity; uniform float uSweep;
-varying vec3 vN; varying vec3 vV; varying vec3 vW;
-void main(){
-  float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.4);
-  float scan = smoothstep(0.82, 1.0, sin(vW.y * 210.0 - uTime * 2.4) * 0.5 + 0.5);
-  float sweepPos = fract(uTime * 0.12) * 2.2 - 0.1;
-  float sweep = exp(-pow((vW.y - sweepPos) * 9.0, 2.0)) * uSweep;
-  float flick = 0.94 + 0.06 * sin(uTime * 37.0 + vW.y * 3.0);
-  float a = (0.05 + fres * 0.85 + scan * 0.07 + sweep * 0.35) * uOpacity * flick;
-  vec3 c = mix(uColor * 0.7, vec3(0.85, 1.0, 1.0), fres * 0.55 + sweep * 0.5);
-  gl_FragColor = vec4(c, a);
-}`;
-
-function holoMaterial(color = CYAN, opacity = 1) {
-  return new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, uColor: { value: color.clone() }, uOpacity: { value: opacity }, uSweep: { value: 1 } },
-    vertexShader: holoVert, fragmentShader: holoFrag, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, side: THREE.FrontSide,
-  });
-}
-
-function glowTexture() {
-  const c = document.createElement("canvas"); c.width = c.height = 128;
-  const g = c.getContext("2d");
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.25, "rgba(255,255,255,.55)");
-  grd.addColorStop(0.6, "rgba(255,255,255,.12)"); grd.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-}
-
+const BONE_WHITE = new THREE.Color("#cfe9ff");
 const REGION_LABEL = {
   head: "Vestibular", eyes: "Eyes · SANS", brain: "Brain · behaviour", heart: "Heart", lungs: "Lungs",
   gut: "Gut · nutrition", lymph: "Immune", spine: "Spine", hips: "Hips · bone", legs: "Legs · muscle",
   joints: "Joints · EVA", body: "Radiation",
 };
+const BONES_KEYS = new Set(["spine", "hips", "legs", "joints"]);
+
+const sharedU = { uTime: { value: 0 } };
+let holoId = 0;
+function holoMat(color = CYAN, opacity = 1, sweep = 1) {
+  const m = new THREE.MeshStandardMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.FrontSide });
+  m.toneMapped = false;
+  m.userData.u = { uColor: { value: color.clone() }, uOpacity: { value: opacity }, uSweep: { value: sweep } };
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, sharedU, m.userData.u);
+    sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vWPos;")
+      .replace("#include <project_vertex>", "#include <project_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;");
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float uTime; uniform vec3 uColor; uniform float uOpacity; uniform float uSweep; varying vec3 vWPos;")
+      .replace("#include <dithering_fragment>", `#include <dithering_fragment>
+        vec3 vd = normalize(vViewPosition);
+        float fres = pow(1.0 - abs(dot(normal, vd)), 2.3);
+        float scan = smoothstep(0.86, 1.0, sin(vWPos.y * 230.0 - uTime * 2.2) * 0.5 + 0.5);
+        float sp = fract(uTime * 0.11) * 2.3 - 0.15;
+        float sweep = exp(-pow((vWPos.y - sp) * 8.0, 2.0)) * uSweep;
+        float flick = 0.95 + 0.05 * sin(uTime * 31.0 + vWPos.y * 4.0);
+        float a = (0.035 + fres * 0.9 + scan * 0.06 + sweep * 0.3) * uOpacity * flick;
+        vec3 c = mix(uColor * 0.65, vec3(0.86, 1.0, 1.0), fres * 0.5 + sweep * 0.45);
+        gl_FragColor = vec4(c, a);`);
+  };
+  const id = holoId++;
+  m.customProgramCacheKey = () => "holo" + (id % 1);
+  return m;
+}
+const glowMat = (c, o = 0.8) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+
+function glowTexture() {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d"); const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, "rgba(255,255,255,1)"); grd.addColorStop(0.22, "rgba(255,255,255,.5)"); grd.addColorStop(0.6, "rgba(255,255,255,.1)"); grd.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const ease = t => 1 - Math.pow(1 - t, 3);
 
 export function createHologram(canvas, opts = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setClearColor(0x000000, 0);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(32, 1, 0.05, 50);
-  camera.position.set(0.0, 1.12, 4.1);
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 60);
+  const HOME = { pos: new THREE.Vector3(0.35, 1.2, 4.35), target: new THREE.Vector3(0, 0.97, 0) };
+  camera.position.set(0, 0.45, 10.5);
+  let userTouched = 0;
   const controls = opts.quad ? null : new OrbitControls(camera, canvas);
   if (controls) {
-    controls.target.set(0, 0.98, 0); controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.enablePan = false; controls.minDistance = 2.2; controls.maxDistance = 6.5;
-    controls.minPolarAngle = 0.9; controls.maxPolarAngle = 1.95;
-    controls.autoRotate = opts.autoRotate !== false; controls.autoRotateSpeed = 0.55;
+    controls.target.copy(HOME.target); controls.enableDamping = true; controls.dampingFactor = 0.07; controls.rotateSpeed = 0.8;
+    controls.enablePan = false; controls.minDistance = 1.2; controls.maxDistance = 7.5; controls.minPolarAngle = 0.55; controls.maxPolarAngle = 2.05;
+    controls.autoRotateSpeed = 0.45;
+    controls.addEventListener("start", () => { userTouched = performance.now(); tween.active = false; });
   }
+
+  // lights (realistic view)
+  const hemi = new THREE.HemisphereLight(0xdfe9f3, 0x0a1016, 0); scene.add(hemi);
+  const key = new THREE.DirectionalLight(0xffffff, 0); key.position.set(2.5, 4, 3.5); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xcfe3ff, 0); rim.position.set(-3, 2.5, -3.5); scene.add(rim);
+  const fill = new THREE.DirectionalLight(0x9db8d6, 0); fill.position.set(-2.5, 1, 2.5); scene.add(fill);
 
   const root = new THREE.Group(); scene.add(root);
-  const body = new THREE.Group(); root.add(body);
-  const mats = [];
-  const parts = {};
-  const mkPart = (name, geo, pos, scale = [1, 1, 1], rot = [0, 0, 0]) => {
-    const m = holoMaterial(); mats.push(m);
-    const mesh = new THREE.Mesh(geo, m);
-    mesh.position.set(...pos); mesh.scale.set(...scale); mesh.rotation.set(...rot);
-    mesh.userData.baseScale = new THREE.Vector3(...scale);
-    body.add(mesh); parts[name] = mesh; return mesh;
-  };
-  const cap = (r, l) => new THREE.CapsuleGeometry(r, l, 10, 24);
-  mkPart("head", new THREE.SphereGeometry(0.112, 40, 32), [0, 1.645, 0], [1, 1.17, 1.06]);
-  mkPart("neck", new THREE.CylinderGeometry(0.048, 0.056, 0.1, 24), [0, 1.5, -0.005]);
-  mkPart("torso", cap(0.165, 0.34), [0, 1.235, 0], [1.28, 1, 0.74]);
-  mkPart("pelvis", cap(0.145, 0.1), [0, 0.95, 0], [1.22, 1, 0.78]);
-  for (const s of [-1, 1]) {
-    mkPart(`uarm${s}`, cap(0.048, 0.25), [s * 0.268, 1.27, 0], [1, 1, 1], [0, 0, s * 0.11]);
-    mkPart(`farm${s}`, cap(0.04, 0.24), [s * 0.3, 0.985, 0.02], [1, 1, 1], [0, 0, s * 0.05]);
-    mkPart(`hand${s}`, new THREE.SphereGeometry(0.045, 20, 16), [s * 0.312, 0.805, 0.03], [0.8, 1.25, 0.6]);
-    mkPart(`thigh${s}`, cap(0.074, 0.34), [s * 0.098, 0.655, 0], [1, 1, 1], [0, 0, s * -0.03]);
-    mkPart(`shin${s}`, cap(0.054, 0.34), [s * 0.104, 0.265, -0.005]);
-    mkPart(`foot${s}`, cap(0.04, 0.12), [s * 0.106, 0.03, 0.05], [1, 1, 0.9], [Math.PI / 2, 0, 0]);
-  }
+  const glowTex = glowTexture();
 
-  // wire ring "scanner" around the body
-  const scanRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.0025, 6, 120),
-    new THREE.MeshBasicMaterial({ color: CYAN, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }));
-  scanRing.rotation.x = Math.PI / 2; root.add(scanRing);
-
-  // projector base
+  /* projector base */
   const base = new THREE.Group(); root.add(base);
-  for (const [r, o] of [[0.52, 0.55], [0.62, 0.3], [0.78, 0.16]]) {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(r - 0.004, r, 128),
-      new THREE.MeshBasicMaterial({ color: CYAN, transparent: true, opacity: o, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = -0.005; base.add(ring);
+  for (const [r, o] of [[0.5, 0.55], [0.6, 0.3], [0.78, 0.15], [1.05, 0.07]]) {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(r - 0.004, r, 160), glowMat(CYAN, o)); ring.material.side = THREE.DoubleSide;
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.001; base.add(ring);
   }
   const ticks = new THREE.Group(); base.add(ticks);
-  for (let i = 0; i < 72; i++) {
-    const a = i / 72 * Math.PI * 2, len = i % 6 === 0 ? 0.05 : 0.022;
-    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(Math.cos(a) * 0.66, 0, Math.sin(a) * 0.66), new THREE.Vector3(Math.cos(a) * (0.66 + len), 0, Math.sin(a) * (0.66 + len))]);
-    ticks.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: CYAN, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })));
+  for (let i = 0; i < 96; i++) {
+    const a = i / 96 * Math.PI * 2, len = i % 8 === 0 ? 0.055 : 0.02;
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(Math.cos(a) * 0.64, 0, Math.sin(a) * 0.64), new THREE.Vector3(Math.cos(a) * (0.64 + len), 0, Math.sin(a) * (0.64 + len))]);
+    ticks.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: CYAN, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, toneMapped: false })));
   }
-  const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.6, 2.0, 64, 1, true),
-    new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-      vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
-      fragmentShader: "uniform float uTime; varying vec2 vUv; void main(){ float a = pow(1.0-vUv.y, 2.2)*0.11; a *= 0.85+0.15*sin(vUv.x*80.0+uTime); gl_FragColor=vec4(0.36,0.88,0.9,a);}",
-    }));
-  cone.position.y = 1.0; root.add(cone);
+  const coneMat = new THREE.ShaderMaterial({
+    uniforms: { uTime: sharedU.uTime }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+    vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
+    fragmentShader: "uniform float uTime; varying vec2 vUv; void main(){ float a = pow(1.0-vUv.y, 2.4)*0.1; a *= 0.85+0.15*sin(vUv.x*90.0+uTime*0.7); gl_FragColor=vec4(0.36,0.88,0.9,a);}",
+  });
+  const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.62, 2.1, 72, 1, true), coneMat); cone.position.y = 1.05; root.add(cone);
+  const scanRing = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.002, 6, 160), glowMat(CYAN, 0.5)); scanRing.rotation.x = Math.PI / 2; root.add(scanRing);
 
-  // radiation particles (intensity follows the radiation risk)
-  const NP = 420;
-  const pGeo = new THREE.BufferGeometry();
-  const pPos = new Float32Array(NP * 3), pSpeed = new Float32Array(NP);
-  for (let i = 0; i < NP; i++) {
-    const a = Math.random() * Math.PI * 2, r = 0.25 + Math.random() * 0.55;
-    pPos[i * 3] = Math.cos(a) * r; pPos[i * 3 + 1] = Math.random() * 2.1; pPos[i * 3 + 2] = Math.sin(a) * r; pSpeed[i] = 0.2 + Math.random() * 0.6;
-  }
+  const NP = 520, pGeo = new THREE.BufferGeometry(), pPos = new Float32Array(NP * 3), pSpeed = new Float32Array(NP);
+  for (let i = 0; i < NP; i++) { const a = Math.random() * 6.283, r = 0.28 + Math.random() * 0.6; pPos[i * 3] = Math.cos(a) * r; pPos[i * 3 + 1] = Math.random() * 2.2; pPos[i * 3 + 2] = Math.sin(a) * r; pSpeed[i] = 0.2 + Math.random() * 0.7; }
   pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
-  const pMat = new THREE.PointsMaterial({ color: CYAN, size: 0.012, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
-  const particles = new THREE.Points(pGeo, pMat); root.add(particles);
+  const pMat = new THREE.PointsMaterial({ color: CYAN, size: 0.011, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  root.add(new THREE.Points(pGeo, pMat));
 
-  // ---- organs ---------------------------------------------------------------
-  const glowTex = glowTexture();
-  const organs = {};      // key -> {meshes:[], sprites:[], anchor:Vector3, band, score}
+  /* state */
+  let mode = { view: opts.view || "hologram", suit: false };
+  let hr = 62, progress = 1, boneLoss = 0.06, focus = null, hovered = null, radScore = 0, organMap = {};
+  let bodyRoot = null, mixer = null, suit = null;
+  const bodyHolo = holoMat(CYAN, 1), bodyX = holoMat(new THREE.Color("#8fd8ff"), 0.4, 0.4), bodyInSuit = holoMat(CYAN, 0.25, 0.2);
+  const bodyReal = new THREE.MeshPhysicalMaterial({ color: 0x24427a, roughness: 0.7, metalness: 0, sheen: 0.6, sheenColor: new THREE.Color(0x8fb4ff) });
+  const bodyRealJoint = new THREE.MeshPhysicalMaterial({ color: 0x131f38, roughness: 0.8 });
+  const boneMat = glowMat(BONE_WHITE, 0.35);
+  const attach = [];
+  const organs = {};
   const hitVols = [];
-  const organGroup = new THREE.Group(); root.add(organGroup);
-  const addOrgan = (key, geo, pos, scale = [1, 1, 1], spriteSize = 0.16) => {
-    const mat = new THREE.MeshBasicMaterial({ color: STATUS.nominal, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat); mesh.position.set(...pos); mesh.scale.set(...scale);
-    mesh.userData.baseScale = new THREE.Vector3(...scale);
-    organGroup.add(mesh);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: STATUS.nominal, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }));
-    sp.position.set(...pos); sp.scale.set(spriteSize, spriteSize, 1); organGroup.add(sp);
-    const o = organs[key] || (organs[key] = { meshes: [], sprites: [], anchor: new THREE.Vector3(...pos), band: "nominal", score: 0 });
-    o.meshes.push(mesh); o.sprites.push(sp);
-    return mesh;
-  };
-  const addHit = (key, pos, r) => {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
-    m.position.set(...pos); m.userData.region = key; organGroup.add(m); hitVols.push(m);
-  };
-  const S = (r, w = 16, h = 12) => new THREE.SphereGeometry(r, w, h);
-  addOrgan("brain", S(0.07, 24, 18), [0, 1.672, -0.005], [1, 0.82, 1.1], 0.2);
-  for (const s of [-1, 1]) addOrgan("eyes", S(0.017), [s * 0.04, 1.645, 0.1], [1, 1, 1], 0.07);
-  for (const s of [-1, 1]) addOrgan("head", S(0.016), [s * 0.104, 1.64, -0.005], [1, 1, 1], 0.06);
-  const heart = addOrgan("heart", S(0.043, 24, 18), [0.045, 1.258, 0.055], [1, 1.15, 0.95], 0.2);
-  for (const s of [-1, 1]) addOrgan("lungs", S(0.06, 20, 16), [s * 0.085, 1.29, 0.0], [1.05, 1.9, 0.95], 0.18);
-  addOrgan("gut", S(0.1, 20, 16), [0, 1.02, 0.03], [1.05, 0.75, 0.6], 0.22);
-  for (let i = 0; i < 17; i++) addOrgan("spine", new THREE.BoxGeometry(0.03, 0.022, 0.026), [0, 0.96 + i * 0.032, -0.085], [1, 1, 1], 0.05);
-  for (const s of [-1, 1]) {
-    addOrgan("hips", S(0.042), [s * 0.088, 0.875, 0.0], [1, 1, 1], 0.12);
-    addOrgan("legs", new THREE.CylinderGeometry(0.016, 0.014, 0.36, 10), [s * 0.098, 0.655, 0.0], [1, 1, 1], 0.05);
-    addOrgan("legs", new THREE.CylinderGeometry(0.013, 0.012, 0.34, 10), [s * 0.104, 0.265, 0.005], [1, 1, 1], 0.05);
-    addOrgan("joints", S(0.026), [s * 0.1, 0.465, 0.02], [1, 1, 1], 0.08);
-    addOrgan("joints", S(0.026), [s * 0.235, 1.39, 0.0], [1, 1, 1], 0.08);
-    addOrgan("lymph", S(0.014), [s * 0.05, 1.5, 0.03], [1, 1, 1], 0.06);
-    addOrgan("lymph", S(0.014), [s * 0.165, 1.33, 0.0], [1, 1, 1], 0.06);
-    addOrgan("lymph", S(0.014), [s * 0.11, 0.86, 0.05], [1, 1, 1], 0.06);
-  }
-  organs.body = { meshes: [], sprites: [], anchor: new THREE.Vector3(0.36, 1.85, 0), band: "nominal", score: 0 };
-  organs.legs.anchor.set(0.12, 0.5, 0); organs.spine.anchor.set(0, 1.2, -0.09); organs.lymph.anchor.set(0.05, 1.5, 0.03);
-  organs.joints.anchor.set(0.1, 0.465, 0.02); organs.hips.anchor.set(0.09, 0.875, 0); organs.lungs.anchor.set(-0.085, 1.33, 0);
-  organs.eyes.anchor.set(0.04, 1.645, 0.1); organs.head.anchor.set(-0.104, 1.64, 0);
-  addHit("eyes", [0, 1.645, 0.11], 0.05); addHit("brain", [0, 1.73, 0], 0.07); addHit("head", [0, 1.62, -0.02], 0.12);
-  addHit("heart", [0.05, 1.25, 0.1], 0.07); for (const s of [-1, 1]) addHit("lungs", [s * 0.1, 1.3, 0.05], 0.075);
-  addHit("lymph", [0, 1.5, 0.05], 0.05); addHit("gut", [0, 1.02, 0.1], 0.1); addHit("hips", [0, 0.88, 0.06], 0.12);
-  addHit("spine", [0, 1.2, -0.13], 0.1);
-  for (const s of [-1, 1]) { addHit("legs", [s * 0.1, 0.65, 0.02], 0.085); addHit("legs", [s * 0.105, 0.27, 0.02], 0.07); addHit("joints", [s * 0.1, 0.465, 0.06], 0.05); }
-
-  // ---- optional Blender model ------------------------------------------------
-  const tryGLB = async () => {
-    try {
-      if (!opts.modelAvailable) return;
-      new GLTFLoader().load("/static/models/astronaut.glb", gltf => {
-        const g = gltf.scene;
-        const box = new THREE.Box3().setFromObject(g);
-        const h = box.max.y - box.min.y || 1;
-        const s = 1.78 / h; g.scale.setScalar(s);
-        const box2 = new THREE.Box3().setFromObject(g);
-        g.position.y -= box2.min.y; g.position.x -= (box2.min.x + box2.max.x) / 2; g.position.z -= (box2.min.z + box2.max.z) / 2;
-        g.traverse(o => { if (o.isMesh) { const m = holoMaterial(); mats.push(m); o.material = m; } });
-        body.visible = false; root.add(g);
-      });
-    } catch (e) { /* procedural body stays */ }
-  };
-  if (opts.loadModel !== false) tryGLB();
-
-  // ---- state -------------------------------------------------------------------
-  let hr = 62, progress = 1, boneLoss = 0.06, focus = null, hovered = null, radScore = 0;
+  const parts = {};
+  let heart = null;
   const clock = new THREE.Clock();
-  const raycaster = new THREE.Raycaster(); const ndc = new THREE.Vector2();
+  const tween = { active: false };
+  function flyTo(pos, target, dur = 1.4) {
+    if (!controls) return;
+    Object.assign(tween, { active: true, t0: clock.getElapsedTime(), dur, p0: camera.position.clone(), p1: pos.clone(), c0: controls.target.clone(), c1: target.clone() });
+  }
+
+  /* load the anatomical body */
+  const loader = new GLTFLoader();
+  const bonesBy = {};
+  const B = n => bonesBy[n.toLowerCase()];
+  loader.load("/static/models/body.glb", gltf => {
+    bodyRoot = gltf.scene;
+    bodyRoot.traverse(o => {
+      if (o.isSkinnedMesh || o.isMesh) { o.frustumCulled = false; o.userData.realMat = /joint/i.test(o.material?.name || "") ? bodyRealJoint : bodyReal; }
+      if (o.isBone) bonesBy[o.name.replace(/[^a-z0-9]/gi, "").replace(/^mixamorig/i, "").toLowerCase()] = o;
+    });
+    const box = new THREE.Box3().setFromObject(bodyRoot);
+    const s = 1.78 / (box.max.y - box.min.y); bodyRoot.scale.setScalar(s);
+    const b2 = new THREE.Box3().setFromObject(bodyRoot);
+    bodyRoot.position.set(-(b2.min.x + b2.max.x) / 2, -b2.min.y, -(b2.min.z + b2.max.z) / 2);
+    root.add(bodyRoot);
+    mixer = new THREE.AnimationMixer(bodyRoot);
+    const idle = gltf.animations.find(a => /idle/i.test(a.name)) || gltf.animations[0];
+    if (idle) mixer.clipAction(idle).play();
+    mixer.update(0.01); root.updateMatrixWorld(true);
+    try { buildAnatomy(); } catch (e) { console.warn("anatomy", e); }
+    applyMode();
+    if (opts.onReady) opts.onReady();
+  });
+
+  const W = o => { const v = new THREE.Vector3(); o.getWorldPosition(v); return root.worldToLocal(v); };
+  function groupFor(bone) {
+    let a = attach.find(x => x.bone === bone);
+    if (a) return a.group;
+    const g = new THREE.Group(); g.matrixAutoUpdate = false;
+    a = { group: g, bone, setupInv: new THREE.Matrix4().copy(bone.matrixWorld).invert() };
+    root.add(g); attach.push(a); return g;
+  }
+  const tube = (pts, r, mat, bone) => {
+    const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.max(8, pts.length * 6), r, 8, false), mat);
+    m.userData.isBone = mat === boneMat; groupFor(bone).add(m); return m;
+  };
+  const blob = (pos, r, scale, mat, bone) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 18), mat || glowMat(STATUS.nominal)); m.position.copy(pos); if (scale) m.scale.set(...scale);
+    m.userData.isBone = mat === boneMat; groupFor(bone).add(m); return m;
+  };
+  function organ(key, mesh, spriteSize = 0.16, anchor = true) {
+    mesh.material = glowMat(STATUS.nominal, 0.6); mesh.userData.baseScale = mesh.scale.clone(); mesh.userData.isBone = false;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: STATUS.nominal, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+    sp.position.copy(mesh.position); sp.scale.set(spriteSize, spriteSize, 1); mesh.parent.add(sp);
+    const o = organs[key] || (organs[key] = { meshes: [], sprites: [], anchorObj: null, band: "nominal", score: 0 });
+    o.meshes.push(mesh); o.sprites.push(sp); if (anchor && !o.anchorObj) o.anchorObj = mesh;
+    return mesh;
+  }
+  function hit(key, pos, r, bone) {
+    if (!bone) return;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+    m.position.copy(pos); m.userData.region = key; m.userData.hit = true; groupFor(bone).add(m); hitVols.push(m);
+  }
+
+  function buildAnatomy() {
+    const hips = B("hips"), sp0 = B("spine"), sp1 = B("spine1"), sp2 = B("spine2"), neck = B("neck"), head = B("head");
+    if (!hips || !head || !sp0 || !sp1 || !sp2 || !neck) return;
+    const P = {}; for (const [k, b] of Object.entries(bonesBy)) P[k] = W(b);
+    const top = new THREE.Box3().setFromObject(bodyRoot).max.y;
+    const shoulderW = P.leftarm && P.rightarm ? P.leftarm.distanceTo(P.rightarm) : 0.36;
+    const headC = new THREE.Vector3(P.head.x, (P.head.y + top) / 2 + 0.005, P.head.z + 0.01);
+    const skullR = (top - P.head.y) / 2 * 0.86;
+    blob(headC, skullR, [0.84, 1.0, 1.0], boneMat, head);
+    blob(headC.clone().add(new THREE.Vector3(0, -skullR * 0.74, skullR * 0.42)), skullR * 0.42, [1.1, 0.5, 0.9], boneMat, head);
+    // spine
+    const spinePts = [P.hips, P.spine, P.spine1, P.spine2, P.neck, P.head].map((p, i) => p.clone().add(new THREE.Vector3(0, i === 0 ? 0.06 : 0, -0.045 + (i === 3 ? -0.012 : 0))));
+    const spineCurve = new THREE.CatmullRomCurve3(spinePts);
+    const vbones = [sp0, sp0, sp1, sp1, sp2, sp2, neck];
+    for (let i = 0; i < 24; i++) {
+      const t = i / 23, p = spineCurve.getPoint(t), bone = vbones[Math.min(vbones.length - 1, Math.floor(t * vbones.length))];
+      const v = new THREE.Mesh(new THREE.CylinderGeometry(0.012 + 0.008 * (1 - t), 0.012 + 0.008 * (1 - t), 0.016, 10)); v.position.copy(p); groupFor(bone).add(v);
+      organ("spine", v, 0.045, i === 12);
+    }
+    // ribcage
+    const rib0 = P.spine1.clone(), rib1 = P.spine2.clone().add(new THREE.Vector3(0, 0.12, 0));
+    for (let i = 0; i < 12; i++) {
+      const t = i / 11, y = THREE.MathUtils.lerp(rib1.y, rib0.y - 0.02, t), cz = THREE.MathUtils.lerp(rib1.z, rib0.z, t);
+      const rx = shoulderW * (0.2 + 0.17 * Math.sin(Math.min(1, t * 1.25 + 0.15) * Math.PI * 0.62));
+      const rz = 0.085 + 0.03 * Math.sin(t * Math.PI * 0.8);
+      for (const s of [-1, 1]) {
+        const pts = [];
+        for (let k = 0; k <= 10; k++) {
+          const a = -Math.PI / 2 + k / 10 * Math.PI * (i > 9 ? 0.72 : 0.94);
+          pts.push(new THREE.Vector3(s * Math.cos(a) * rx, y - 0.045 * Math.sin(k / 10 * Math.PI * 0.5), cz + Math.sin(a) * rz - 0.01));
+        }
+        tube(pts, 0.0055, boneMat, t < 0.5 ? sp2 : sp1);
+      }
+    }
+    tube([new THREE.Vector3(P.spine2.x, rib1.y - 0.01, P.spine2.z + 0.095), new THREE.Vector3(P.spine1.x, rib0.y + 0.03, P.spine1.z + 0.1)], 0.011, boneMat, sp2);
+    for (const s of ["left", "right"]) if (P[s + "arm"]) tube([new THREE.Vector3(0, rib1.y + 0.005, P.spine2.z + 0.08), (P[s + "shoulder"] ? P[s + "shoulder"].clone().lerp(P[s + "arm"], 0.6) : P[s + "arm"].clone()).add(new THREE.Vector3(0, 0.01, 0.02))], 0.007, boneMat, sp2);
+    // pelvis
+    const pel = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.016, 10, 40, Math.PI * 1.55), boneMat); pel.userData.isBone = true;
+    pel.position.copy(P.hips).add(new THREE.Vector3(0, -0.02, 0)); pel.rotation.set(Math.PI / 2 + 0.25, 0, Math.PI * 1.22); groupFor(hips).add(pel);
+    for (const s of [-1, 1]) organ("hips", blob(P.hips.clone().add(new THREE.Vector3(s * 0.085, 0.035, -0.005)), 0.06, [0.75, 0.9, 0.35], null, hips), 0.14, s === 1);
+    // limbs
+    const limb = (a, b, r, keyName, bone) => {
+      if (!P[a] || !P[b] || !B(bone)) return;
+      const m = tube([P[a], P[a].clone().lerp(P[b], 0.5), P[b]], r, boneMat, B(bone));
+      if (keyName) organ(keyName, m, 0.05, false);
+    };
+    for (const s of ["left", "right"]) {
+      limb(s + "arm", s + "forearm", 0.011, null, s + "arm");
+      limb(s + "forearm", s + "hand", 0.009, null, s + "forearm");
+      limb(s + "upleg", s + "leg", 0.016, "legs", s + "upleg");
+      limb(s + "leg", s + "foot", 0.013, "legs", s + "leg");
+      if (P[s + "leg"] && B(s + "leg")) organ("joints", blob(P[s + "leg"].clone().add(new THREE.Vector3(0, 0, 0.02)), 0.026, null, null, B(s + "leg")), 0.08, s === "left");
+      if (P[s + "arm"] && B(s + "arm")) organ("joints", blob(P[s + "arm"], 0.024, null, null, B(s + "arm")), 0.08, false);
+    }
+    if (organs.legs) organs.legs.anchorObj = organs.legs.meshes[0];
+    // organs
+    const chest = P.spine2.clone(), belly = P.spine.clone();
+    organ("brain", blob(headC.clone().add(new THREE.Vector3(0, skullR * 0.12, -0.004)), skullR * 0.8, [0.85, 0.72, 1.0], null, head), 0.2);
+    for (const s of [-1, 1]) organ("eyes", blob(headC.clone().add(new THREE.Vector3(s * skullR * 0.36, -skullR * 0.08, skullR * 0.86)), 0.015, null, null, head), 0.07, s === 1);
+    for (const s of [-1, 1]) organ("head", blob(headC.clone().add(new THREE.Vector3(s * skullR * 0.9, -skullR * 0.12, -0.005)), 0.014, null, null, head), 0.06, s === -1);
+    heart = organ("heart", blob(chest.clone().add(new THREE.Vector3(0.028, -0.02, 0.05)), 0.042, [1, 1.18, 0.95], null, sp2), 0.2);
+    for (const s of [-1, 1]) organ("lungs", blob(chest.clone().add(new THREE.Vector3(s * shoulderW * 0.2, 0.01, 0)), 0.06, [1.0, 1.85, 0.95], null, sp2), 0.18, s === -1);
+    organ("gut", blob(belly.clone().add(new THREE.Vector3(0, -0.03, 0.045)), 0.085, [1.15, 0.85, 0.65], null, sp0), 0.22);
+    [[neck, P.neck.clone().add(new THREE.Vector3(0.04, -0.01, 0.03))], [neck, P.neck.clone().add(new THREE.Vector3(-0.04, -0.01, 0.03))],
+      [sp2, P.spine2.clone().add(new THREE.Vector3(shoulderW * 0.36, 0.06, 0))], [sp2, P.spine2.clone().add(new THREE.Vector3(-shoulderW * 0.36, 0.06, 0))],
+      [hips, P.hips.clone().add(new THREE.Vector3(0.09, -0.04, 0.06))], [hips, P.hips.clone().add(new THREE.Vector3(-0.09, -0.04, 0.06))]]
+      .forEach(([b, p], i) => organ("lymph", blob(p, 0.013, null, null, b), 0.06, i === 0));
+    organs.body = { meshes: [], sprites: [], anchorObj: null, anchorPos: new THREE.Vector3(0.34, 1.9, 0), band: "nominal", score: 0 };
+    // tap targets
+    hit("eyes", headC.clone().add(new THREE.Vector3(0, -skullR * 0.08, skullR)), 0.05, head);
+    hit("brain", headC.clone().add(new THREE.Vector3(0, skullR * 0.6, 0)), 0.07, head);
+    hit("head", headC, skullR * 1.1, head);
+    hit("heart", chest.clone().add(new THREE.Vector3(0.04, -0.02, 0.1)), 0.07, sp2);
+    for (const s of [-1, 1]) hit("lungs", chest.clone().add(new THREE.Vector3(s * shoulderW * 0.22, 0.03, 0.06)), 0.075, sp2);
+    hit("lymph", P.neck.clone().add(new THREE.Vector3(0, 0, 0.05)), 0.05, neck);
+    hit("gut", belly.clone().add(new THREE.Vector3(0, -0.03, 0.1)), 0.1, sp0);
+    hit("hips", P.hips.clone().add(new THREE.Vector3(0, -0.02, 0.06)), 0.12, hips);
+    hit("spine", P.spine1.clone().add(new THREE.Vector3(0, 0, -0.13)), 0.1, sp1);
+    for (const s of ["left", "right"]) {
+      if (P[s + "upleg"] && P[s + "leg"]) hit("legs", P[s + "upleg"].clone().lerp(P[s + "leg"], 0.5).add(new THREE.Vector3(0, 0, 0.03)), 0.085, B(s + "upleg"));
+      if (P[s + "leg"] && P[s + "foot"]) hit("legs", P[s + "leg"].clone().lerp(P[s + "foot"], 0.5), 0.07, B(s + "leg"));
+      if (P[s + "leg"]) hit("joints", P[s + "leg"].clone().add(new THREE.Vector3(0, 0, 0.06)), 0.05, B(s + "leg"));
+    }
+    Object.assign(parts, { head, legs: [B("leftupleg"), B("rightupleg"), B("leftleg"), B("rightleg")].filter(Boolean) });
+    setOrgans(organMap);
+  }
+
+  /* NASA Z2 suit */
+  function loadSuit() {
+    if (suit) return;
+    suit = "loading";
+    loader.load("/static/models/z2.glb", gltf => {
+      const g = gltf.scene;
+      const box = new THREE.Box3().setFromObject(g); g.scale.setScalar(1.93 / (box.max.y - box.min.y));
+      const b2 = new THREE.Box3().setFromObject(g);
+      g.position.set(-(b2.min.x + b2.max.x) / 2, -b2.min.y, -(b2.min.z + b2.max.z) / 2 + 0.07);
+      g.traverse(o => { if (o.isMesh) { if (o.material && 'specularIntensity' in o.material) { o.material.specularIntensity = 0.35; o.material.specularIntensityMap = null; o.material.specularColorMap = null; o.material.needsUpdate = true; } o.userData.real = o.material; o.userData.holo = holoMat(CYAN, 0.95); o.userData.xray = holoMat(new THREE.Color("#9fe7ff"), 0.2, 0.2); } });
+      suit = g; root.add(g); applyMode();
+      if (opts.onSuit) opts.onSuit();
+    }, undefined, () => { suit = null; });
+  }
+
+  function applyMode() {
+    const v = mode.view;
+    if (mode.suit) loadSuit();
+    const suitOn = mode.suit && suit && suit !== "loading";
+    if (bodyRoot) {
+      bodyRoot.visible = !(suitOn && v === "realistic");
+      bodyRoot.traverse(o => { if (o.isMesh || o.isSkinnedMesh) o.material = v === "realistic" ? o.userData.realMat : v === "xray" ? bodyX : (suitOn ? bodyInSuit : bodyHolo); });
+    }
+    if (suit && suit !== "loading") {
+      suit.visible = !!suitOn;
+      if (suitOn) suit.traverse(o => { if (o.isMesh) o.material = v === "realistic" ? o.userData.real : v === "xray" ? o.userData.xray : o.userData.holo; });
+    }
+    boneMat.opacity = v === "xray" ? 0.8 : 0.16;
+    attach.forEach(a => a.group.children.forEach(c => { if (c.userData.isBone) c.visible = v !== "realistic"; }));
+    const showOrgans = v !== "realistic";
+    for (const o of Object.values(organs)) { o.meshes.forEach(m => m.visible = showOrgans); o.sprites.forEach(s => s.visible = showOrgans); }
+    cone.visible = v !== "realistic"; scanRing.visible = v !== "realistic";
+    const L = v === "realistic" ? 1 : 0;
+    hemi.intensity = 1.25 * L; key.intensity = 2.2 * L; rim.intensity = 1.1 * L; fill.intensity = 0.7 * L;
+    setOrgans(organMap);
+  }
 
   function setOrgans(map) {
-    for (const [k, v] of Object.entries(map || {})) {
+    organMap = map || {};
+    const v = mode.view;
+    for (const [k, val] of Object.entries(organMap)) {
       const o = organs[k]; if (!o) continue;
-      o.band = v.band; o.score = v.score;
-      const c = STATUS[v.band] || STATUS.nominal;
-      o.meshes.forEach(m => { m.material.color.copy(c); m.material.opacity = v.band === "nominal" ? 0.55 : 0.9; });
-      o.sprites.forEach(s => { s.material.color.copy(c); s.material.opacity = v.band === "nominal" ? 0.32 : 0.8; });
+      o.band = val.band; o.score = val.score;
+      const c = STATUS[val.band] || STATUS.nominal, isBone = BONES_KEYS.has(k);
+      o.meshes.forEach(m => {
+        if (isBone && val.band === "nominal") { m.material.color.copy(BONE_WHITE); m.userData.baseOp = v === "xray" ? 0.85 : 0.22; }
+        else { m.material.color.copy(c); m.userData.baseOp = val.band === "nominal" ? (v === "xray" ? 0.75 : 0.45) : 0.95; }
+      });
+      o.sprites.forEach(s => { s.material.color.copy(c); s.userData.baseOp = val.band === "nominal" ? (isBone ? 0 : 0.25) : 0.85; });
     }
-    radScore = (map && map.body && map.body.score) || 0;
+    radScore = (organMap.body && organMap.body.score) || 0;
   }
   function setHeartRate(b) { if (b > 20 && b < 220) hr = b; }
-  function setProgress(p, loss) { progress = p; if (loss !== undefined) boneLoss = loss; applyMorph(); }
-  function setFocus(k) { focus = k; }
-  function applyMorph() {
-    const p = progress;
-    const face = 1 + 0.075 * p, leg = 1 - 0.13 * p;
-    if (parts.head) parts.head.scale.set(face, 1.17 * (1 + 0.02 * p), 1.06 * face);
-    if (parts.neck) parts.neck.scale.set(1 + 0.05 * p, 1, 1 + 0.05 * p);
-    for (const s of [-1, 1]) {
-      const t = parts[`thigh${s}`], sh = parts[`shin${s}`];
-      if (t) t.scale.set(leg, 1, leg); if (sh) sh.scale.set(leg * 0.98, 1, leg * 0.98);
-    }
-    if (parts.torso) parts.torso.scale.set(1.28, 1 + 0.025 * p, 0.74 * (1 + 0.03 * p));
-    const boneOp = Math.max(0.25, 0.85 - 6 * boneLoss * p);
-    ["hips", "legs", "spine"].forEach(k => organs[k] && organs[k].meshes.forEach(m => m.userData.boneOp = boneOp));
+  function setProgress(p, loss) { progress = p; if (loss !== undefined) boneLoss = loss; }
+  function setFocus(k) {
+    focus = k;
+    if (!controls) return;
+    if (!k) { flyTo(HOME.pos, HOME.target, 1.2); return; }
+    const o = organs[k]; const obj = o && (o.anchorObj || o.meshes[0]);
+    const p = new THREE.Vector3();
+    if (obj) obj.getWorldPosition(p); else if (o && o.anchorPos) { p.copy(o.anchorPos); root.localToWorld(p); } else return;
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    const dist = ["legs", "joints", "hips", "body"].includes(k) ? 2.4 : 1.7;
+    flyTo(p.clone().add(dir.multiplyScalar(dist)), p, 1.3);
   }
+  function setMode(m) { mode = { ...mode, ...m }; applyMode(); }
 
-  function resize() {
-    const w = canvas.clientWidth || canvas.parentElement.clientWidth, h = canvas.clientHeight || canvas.parentElement.clientHeight;
-    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-  }
-  const ro = new ResizeObserver(resize); ro.observe(canvas.parentElement || canvas); resize();
-
+  /* picking */
+  const raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
   function pick(ev) {
     const r = canvas.getBoundingClientRect();
     ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
-    const hit = raycaster.intersectObjects(hitVols, false)[0];
-    return hit ? hit.object.userData.region : null;
+    const h = raycaster.intersectObjects(hitVols, false)[0];
+    return h ? h.object.userData.region : null;
   }
   let downAt = null;
   if (!opts.quad) {
     canvas.addEventListener("pointerdown", e => { downAt = [e.clientX, e.clientY]; });
     canvas.addEventListener("pointerup", e => {
       if (!downAt) return; const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]); downAt = null;
-      if (moved > 6) return;
-      const k = pick(e); if (k && opts.onRegion) { focus = k; opts.onRegion(k); }
+      if (moved > 6) return; const k = pick(e); if (k && opts.onRegion) { setFocus(k); opts.onRegion(k); }
     });
     canvas.addEventListener("pointermove", e => { hovered = pick(e); canvas.style.cursor = hovered ? "pointer" : "grab"; });
     canvas.addEventListener("pointerleave", () => { hovered = null; });
   }
 
-  // labels
-  const labelsEl = opts.labelsEl;
-  const labelNodes = {};
-  if (labelsEl) {
-    for (const k of Object.keys(organs)) {
-      const d = document.createElement("div"); d.className = "olabel hide"; d.dataset.k = k;
-      d.addEventListener("click", () => { focus = k; opts.onRegion && opts.onRegion(k); });
-      labelsEl.appendChild(d); labelNodes[k] = d;
-    }
+  /* labels */
+  const labelsEl = opts.labelsEl, labelNodes = {};
+  if (labelsEl) for (const k of Object.keys(REGION_LABEL)) {
+    const d = document.createElement("div"); d.className = "olabel hide";
+    d.addEventListener("click", () => { setFocus(k); opts.onRegion && opts.onRegion(k); });
+    labelsEl.appendChild(d); labelNodes[k] = d;
   }
   const v3 = new THREE.Vector3();
   function updateLabels() {
     if (!labelsEl) return;
     const w = canvas.clientWidth, h = canvas.clientHeight;
-    for (const [k, o] of Object.entries(organs)) {
-      const n = labelNodes[k]; if (!n) continue;
-      const show = o.band !== "nominal" || hovered === k || focus === k;
+    for (const [k, n] of Object.entries(labelNodes)) {
+      const o = organs[k];
+      if (!o || (!o.anchorObj && !o.anchorPos)) { n.classList.add("hide"); continue; }
+      const show = mode.view === "realistic" ? o.band === "act" : (o.band !== "nominal" || hovered === k || focus === k);
       if (!show) { n.classList.add("hide"); continue; }
-      v3.copy(o.anchor); root.localToWorld(v3); v3.project(camera);
+      if (o.anchorObj) o.anchorObj.getWorldPosition(v3); else { v3.copy(o.anchorPos); root.localToWorld(v3); }
+      v3.project(camera);
       if (v3.z > 1) { n.classList.add("hide"); continue; }
-      n.classList.remove("hide");
       n.className = `olabel ${o.band}`;
       n.style.left = ((v3.x + 1) / 2 * w) + "px"; n.style.top = ((1 - v3.y) / 2 * h) + "px";
       n.textContent = `${REGION_LABEL[k] || k} ${Math.round(o.score)}`;
     }
   }
 
-  // quad (Pepper's ghost) rendering
-  const quadViews = [
-    { up: [0, -1, 0], rot: 0, cell: [1, 2] },          // bottom → front view, upside down
-    { up: [0, 1, 0], rot: Math.PI, cell: [1, 0] },     // top → back view
-    { up: [1, 0, 0], rot: Math.PI / 2, cell: [0, 1] }, // left
-    { up: [-1, 0, 0], rot: -Math.PI / 2, cell: [2, 1] } // right
-  ];
+  function resize() {
+    const el = canvas.parentElement || canvas;
+    const w = canvas.clientWidth || el.clientWidth, h = canvas.clientHeight || el.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  const ro = new ResizeObserver(resize); ro.observe(canvas.parentElement || canvas); resize();
 
-  let raf = 0, alive = true;
+  const quadViews = [
+    { up: [0, -1, 0], rot: 0, cell: [1, 2] }, { up: [0, 1, 0], rot: Math.PI, cell: [1, 0] },
+    { up: [1, 0, 0], rot: Math.PI / 2, cell: [0, 1] }, { up: [-1, 0, 0], rot: -Math.PI / 2, cell: [2, 1] },
+  ];
+  const tmpM = new THREE.Matrix4(), rootInv = new THREE.Matrix4();
+  const syncAttach = () => {
+    root.updateMatrixWorld(true); rootInv.copy(root.matrixWorld).invert();
+    for (const a of attach) { a.group.matrix.multiplyMatrices(rootInv, tmpM.multiplyMatrices(a.bone.matrixWorld, a.setupInv)); a.group.matrixWorldNeedsUpdate = true; }
+  };
+
+  flyTo(HOME.pos, HOME.target, 2.8);
+
+  let raf = 0, alive = true, last = 0;
   function frame() {
     if (!alive) return;
     raf = requestAnimationFrame(frame);
-    const t = clock.getElapsedTime();
-    mats.forEach(m => { m.uniforms.uTime.value = t; });
-    cone.material.uniforms.uTime.value = t;
-    scanRing.position.y = 0.1 + (Math.sin(t * 0.6) * 0.5 + 0.5) * 1.65;
-    scanRing.material.opacity = 0.25 + 0.25 * Math.sin(t * 0.6 + 1.2) ** 2;
-    ticks.rotation.y = t * 0.12;
-    // heartbeat: lub-dub at the live heart rate
+    const t = clock.getElapsedTime(), dt = Math.min(0.05, t - last); last = t;
+    sharedU.uTime.value = t;
+    if (mixer) mixer.update(dt);
+    if (parts.head) {
+      const p = progress, face = 1 + 0.07 * p, leg = 1 - 0.12 * p;
+      parts.head.scale.set(face, 1 + 0.015 * p, face);
+      parts.legs.forEach(b => b.scale.set(leg, 1, leg));
+    }
+    scanRing.position.y = 0.08 + (Math.sin(t * 0.55) * 0.5 + 0.5) * 1.72;
+    scanRing.material.opacity = 0.2 + 0.3 * Math.sin(t * 0.55 + 1.2) ** 2;
+    ticks.rotation.y = t * 0.1;
     const period = 60 / hr, ph = (t % period) / period;
     const beat = Math.exp(-Math.pow((ph - 0.08) * 22, 2)) + 0.6 * Math.exp(-Math.pow((ph - 0.28) * 22, 2));
-    const hb = 1 + 0.22 * beat;
-    heart.scale.set(heart.userData.baseScale.x * hb, heart.userData.baseScale.y * hb, heart.userData.baseScale.z * hb);
-    organs.heart.sprites.forEach(s => s.scale.setScalar(0.2 * (1 + 0.5 * beat)));
-    // pulse acting organs
+    if (heart) heart.scale.copy(heart.userData.baseScale).multiplyScalar(1 + 0.22 * beat);
+    if (organs.heart) organs.heart.sprites.forEach(s => s.scale.setScalar(0.2 * (1 + 0.5 * beat)));
+    const boneFade = Math.max(0.3, 1 - 5 * boneLoss * progress);
     for (const [k, o] of Object.entries(organs)) {
-      const act = o.band === "act", foc = focus === k || hovered === k;
+      const act = o.band === "act", foc = focus === k || hovered === k, isBone = k === "spine" || k === "hips" || k === "legs";
       o.meshes.forEach(m => {
-        const bo = m.userData.boneOp;
-        let op = (o.band === "nominal" ? 0.55 : 0.9) * (bo !== undefined ? bo / 0.85 : 1);
-        if (act) op *= 0.7 + 0.3 * Math.sin(t * 4.2) ** 2;
+        let op = m.userData.baseOp ?? 0.5;
+        if (isBone) op *= boneFade;
+        if (act) op *= 0.65 + 0.35 * Math.sin(t * 4.2) ** 2;
         if (foc) op = 1;
         m.material.opacity = op;
       });
       o.sprites.forEach(s => {
-        let op = o.band === "nominal" ? 0.28 : 0.75;
-        if (act) op *= 0.6 + 0.4 * Math.sin(t * 4.2) ** 2;
-        if (foc) op = 1;
+        let op = s.userData.baseOp ?? 0.3;
+        if (act) op *= 0.55 + 0.45 * Math.sin(t * 4.2) ** 2;
+        if (foc) op = Math.max(op, 0.9);
         s.material.opacity = op;
       });
     }
-    // radiation particles
-    const pa = pGeo.attributes.position.array;
-    const speed = 0.25 + radScore / 40;
-    for (let i = 0; i < NP; i++) { pa[i * 3 + 1] -= pSpeed[i] * 0.004 * speed; if (pa[i * 3 + 1] < 0) pa[i * 3 + 1] = 2.1; }
+    const pa = pGeo.attributes.position.array, speed = 0.25 + radScore / 40;
+    for (let i = 0; i < NP; i++) { pa[i * 3 + 1] -= pSpeed[i] * 0.004 * speed; if (pa[i * 3 + 1] < 0) pa[i * 3 + 1] = 2.2; }
     pGeo.attributes.position.needsUpdate = true;
-    pMat.opacity = 0.12 + Math.min(0.6, radScore / 110);
+    pMat.opacity = mode.view === "realistic" ? 0.06 : 0.1 + Math.min(0.6, radScore / 110);
     pMat.color.copy(radScore >= 60 ? STATUS.act : radScore >= 30 ? STATUS.watch : CYAN);
 
     if (opts.quad) {
-      const W = canvas.clientWidth, H = canvas.clientHeight;
-      const L = Math.min(W, H), cell = L / 3, ox = (W - L) / 2, oy = (H - L) / 2;
+      const Wd = canvas.clientWidth, Hd = canvas.clientHeight, L = Math.min(Wd, Hd), cell = L / 3, ox = (Wd - L) / 2, oy = (Hd - L) / 2;
       renderer.setScissorTest(true); renderer.setClearColor(0x000000, 1); renderer.clear();
       camera.aspect = 1; camera.updateProjectionMatrix();
-      const dpr = 1;
       for (const v of quadViews) {
         const x = ox + v.cell[0] * cell, y = oy + (2 - v.cell[1]) * cell;
-        renderer.setViewport(x * dpr, y * dpr, cell * dpr, cell * dpr); renderer.setScissor(x * dpr, y * dpr, cell * dpr, cell * dpr);
-        root.rotation.y = t * 0.35 + v.rot;
-        camera.position.set(0, 0.98, 3.6); camera.up.set(...v.up); camera.lookAt(0, 0.98, 0);
+        renderer.setViewport(x, y, cell, cell); renderer.setScissor(x, y, cell, cell);
+        root.rotation.y = t * 0.35 + v.rot; syncAttach();
+        camera.position.set(0, 0.98, 3.7); camera.up.set(...v.up); camera.lookAt(0, 0.98, 0);
         renderer.render(scene, camera);
       }
       renderer.setScissorTest(false);
-    } else {
-      controls && controls.update();
-      renderer.render(scene, camera);
-      updateLabels();
+      return;
     }
+    syncAttach();
+    if (tween.active && controls) {
+      const k = Math.min(1, (t - tween.t0) / tween.dur), e = ease(k);
+      camera.position.lerpVectors(tween.p0, tween.p1, e); controls.target.lerpVectors(tween.c0, tween.c1, e);
+      if (k >= 1) tween.active = false;
+    }
+    if (controls) { controls.autoRotate = (opts.autoRotate !== false) && !focus && !tween.active && performance.now() - userTouched > 6000; controls.update(); }
+    renderer.render(scene, camera);
+    updateLabels();
   }
   frame();
-  applyMorph();
 
   return {
-    setOrgans, setHeartRate, setProgress, setFocus,
+    setOrgans, setHeartRate, setProgress, setFocus, setMode,
+    getMode: () => ({ ...mode }),
     dispose() { alive = false; cancelAnimationFrame(raf); ro.disconnect(); renderer.dispose(); },
     setAutoRotate(b) { if (controls) controls.autoRotate = b; },
   };

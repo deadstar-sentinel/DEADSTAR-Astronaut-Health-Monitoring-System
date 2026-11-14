@@ -134,7 +134,7 @@ a:hover { text-decoration: underline; }
 .evidence li::before { content: "›"; position: absolute; left: 0; color: var(--ink-3); }
 
 /* ---------- hologram stage ---------- */
-.stage { position: relative; height: 448px; background: radial-gradient(ellipse at 50% 85%, #0b1c24 0%, #070c12 55%, var(--bg) 100%); overflow: hidden; border-bottom: 1px solid var(--line); }
+.stage { position: relative; height: 492px; background: radial-gradient(ellipse at 50% 85%, #0b1c24 0%, #070c12 55%, var(--bg) 100%); overflow: hidden; border-bottom: 1px solid var(--line); }
 .stage canvas { display: block; width: 100%; height: 100%; }
 .stage-hud { position: absolute; inset: 0; pointer-events: none; }
 .stage-hud > * { pointer-events: auto; }
@@ -378,3 +378,15 @@ table.data td.r, table.data th.r { text-align: right; }
   .race { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* suit telemetry */
+.suit-panel { position: absolute; right: 16px; top: 150px; bottom: 54px; overflow-y: auto; width: 262px; background: rgba(8, 13, 19, .9); border: 1px solid var(--line-2); border-radius: var(--r); padding: 11px 12px 12px; display: none; z-index: 4; backdrop-filter: blur(6px); }
+.suit-panel.open { display: block; }
+.suit-panel table { width: 100%; border-collapse: collapse; font: 11px/1.35 var(--mono); margin-top: 6px; }
+.suit-panel th { text-align: right; font: 500 9.5px/1.2 var(--sans); letter-spacing: .08em; color: var(--ink-3); padding: 0 0 4px; text-transform: uppercase; }
+.suit-panel th:first-child, .suit-panel td:first-child { text-align: left; color: var(--ink-2); font-family: var(--sans); }
+.suit-panel td { text-align: right; padding: 3px 0; border-top: 1px dashed var(--line); }
+.suit-panel td.s { color: var(--accent); }
+.suit-panel .r-big { font: 500 26px/1 var(--mono); }
+.suit-panel input[type=range] { width: 100%; accent-color: var(--accent); }
+.hud-tr .seg button { font-size: 9.5px; padding: 4px 7px; }

@@ -72,6 +72,8 @@ function buildStatic() {
     try { await post("/api/log", { crew: $("#logCrew").value, signal: $("#logSig").value, value: $("#logVal").value }); toast("Logged. Forecasts updated."); refresh(true); }
     catch (err) { toast("Could not log: " + err.message); }
   };
+  $("#viewSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; $$("#viewSeg button").forEach(x => x.classList.toggle("on", x === b)); holo.setMode({ view: b.dataset.v }); };
+  $("#wearSeg").onclick = e => { const b = e.target.closest("button"); if (!b) return; $$("#wearSeg button").forEach(x => x.classList.toggle("on", x === b)); const suit = b.dataset.w === "suit"; holo.setMode({ suit }); S.suit = suit; renderSuit(); };
   renderMethods();
   try {
     const q = window.qrcode(0, "M"); q.addData(location.origin + "/astronaut"); q.make();
@@ -170,11 +172,48 @@ async function selectCrew(cid, full) {
   holo.setOrgans(d.organs);
   holo.setHeartRate(S.live?.hr ?? v.hr);
   const dr = $("#dayRange"); dr.max = d.mission_day; if (full) dr.value = d.mission_day; onDay();
-  renderForecast();
+  renderForecast(); renderSuit();
   if (S.pane === "whatif") renderWhatIf(true);
   if (S.pane === "ready") renderReady();
   if (S.pane === "rad") renderRad();
   if ($("#drawer").classList.contains("open") && S.region) openRegion(S.region);
+}
+
+/* ------------------------------------------------------------------ suit vs cabin */
+const EXTERNAL = {
+  mars_transit: "Deep space: about +120 °C in sunlight to −150 °C in shade",
+  iss: "Low Earth orbit: about +120 °C in sunlight to −150 °C in shade",
+  artemis: "Lunar surface: about +127 °C by day to −173 °C at night",
+  mars_surface: "Mars surface: about −63 °C on average, 0.6 kPa CO₂ atmosphere",
+};
+function renderSuit() {
+  const el = $("#suitPanel");
+  if (!S.suit || !S.st || !S.detail) { el.classList.remove("open"); return; }
+  const v = S.detail.summary.vitals, env = S.st.env;
+  const met = Math.round(90 + 5.5 * Math.max(0, v.hr - 55));
+  S.pb = S.pb ?? 120; if (!S.atm || S.atmMission !== S.st.mission.id) { S.atm = S.st.mission.id === "iss" ? "sea" : "explo"; S.atmMission = S.st.mission.id; }
+  const pN2 = S.atm === "sea" ? 14.7 * 0.79 : 8.2 * 0.66;
+  const R = pN2 * Math.pow(2, -S.pb / 360) / 4.3;
+  const band = R <= 1.2 ? "nominal" : R <= 1.6 ? "watch" : "act";
+  el.innerHTML = `<div class="lbl">EVA suit vs cabin · ${esc(S.detail.summary.name.split(" ").slice(-1)[0])}</div>
+    <table><thead><tr><th></th><th>Cabin</th><th>Z2 suit</th></tr></thead><tbody>
+      <tr><td>Pressure</td><td>${S.atm === "sea" ? "101.3 kPa" : "56.5 kPa"}</td><td class="s">29.6 kPa</td></tr>
+      <tr><td>Oxygen</td><td>${S.atm === "sea" ? "21 %" : "34 %"}</td><td class="s">100 %</td></tr>
+      <tr><td>ppO₂</td><td>${S.atm === "sea" ? "≈160" : "≈144"} mmHg</td><td class="s">≈222 mmHg</td></tr>
+      <tr><td>ppCO₂</td><td>${fmt(env.co2.now, 2)} mmHg</td><td class="s">PLSS-scrubbed</td></tr>
+      <tr><td>Temperature</td><td>${fmt(env.cabin_temp.now, 1)} °C</td><td class="s">LCVG-cooled</td></tr>
+      <tr><td>Heart rate</td><td>${fmt(v.hr, 0)} bpm</td><td class="s">biomed link</td></tr>
+      <tr><td>Metabolic (est.)</td><td colspan="2" style="text-align:right">${met} W to remove</td></tr>
+    </tbody></table>
+    <div class="dim" style="font-size:10.5px;margin:6px 0 10px">${esc(EXTERNAL[S.st.mission.id] || "")}</div>
+    <div class="lbl">Decompression sickness check</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px"><span class="r-big" style="color:${band === "act" ? "#f19ae0" : band === "watch" ? "#f0b660" : "var(--accent)"}">R ${fmt(R, 2)}</span><span class="chip ${band}">${band === "nominal" ? "Low" : band === "watch" ? "Moderate" : "Elevated"}</span></div>
+    <div class="seg" id="atmSeg" style="margin:8px 0 4px"><button data-a="sea" class="${S.atm === "sea" ? "on" : ""}">101 kPa · 21 % O₂</button><button data-a="explo" class="${S.atm === "explo" ? "on" : ""}">56.5 kPa · 34 % O₂</button></div>
+    <div class="ctrl" style="border:0;padding:4px 0 0"><div class="top-row"><span style="font-size:11px">O₂ prebreathe</span><span class="v" style="font-size:12px">${S.pb} min</span></div><input type="range" id="pbRange" min="0" max="300" step="10" value="${S.pb}"></div>
+    <div class="dim" style="font-size:10px;line-height:1.4">Tissue ratio R = tissue N₂ / suit pressure, single 360-min tissue. The second option is NASA's proposed exploration atmosphere, which cuts the prebreathe needed. Decision support only.</div>`;
+  el.classList.add("open");
+  $("#pbRange").oninput = e => { S.pb = +e.target.value; renderSuit(); };
+  $("#atmSeg").onclick = e => { const b = e.target.closest("button"); if (b) { S.atm = b.dataset.a; renderSuit(); } };
 }
 
 function onDay() {
