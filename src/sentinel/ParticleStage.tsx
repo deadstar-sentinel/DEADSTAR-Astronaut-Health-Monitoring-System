@@ -27,6 +27,19 @@ export type ShapeId = "body" | "earth" | "helix";
 export const SHAPES: ShapeId[] = ["body", "earth", "body", "body", "helix", "body"];
 export const EARTH_X = -2.25;
 export const SHIP_X = 2.25;
+/** Camera distance in the Earth–ship scene (rig.camZ there). */
+export const EARTH_CAM_Z = 7.4;
+
+/**
+ * How far to pull the camera back in the Earth–ship scene. Narrow (portrait) screens need
+ * more distance so Earth's full disc and the ship both stay on screen with a margin.
+ */
+export function earthSceneFit(aspect: number): number {
+  const legacy = aspect < 1.25 ? 1 + (1.25 - aspect) * 1.6 : 1;
+  const needHalfW = Math.abs(EARTH_X) + 0.78 + 0.32; // Earth radius 0.78 plus margin
+  const widthFit = needHalfW / (EARTH_CAM_Z * Math.tan((34 * Math.PI) / 360) * aspect);
+  return Math.max(legacy, widthFit);
+}
 const MID_Y = 0.95;
 const GAIN: Record<ShapeId, number> = { body: 0.15, earth: 0.5, helix: 0.2 };
 
@@ -475,7 +488,14 @@ export function ParticleStage({ rig, onReady }: { rig: StageRig; onReady: () => 
       if (yaw > Math.PI) yaw -= Math.PI * 2; // keep the turn short when the subject settles
       group.rotation.y = (yaw + rig.rotY) * (1 - still) + mx * 0.45 * (1 - still * 0.8);
       group.position.x = rig.x * side;
-      const fit = aspect < 1.25 && (from === "earth" || to === "earth") ? 1 + (1.25 - aspect) * 1.6 * (from === "earth" ? 1 - t : t) : 1;
+      const earthW = from === "earth" ? 1 - t : to === "earth" ? t : 0;
+      // Portrait phones: the story text sits in the lower half, so the body and helix move up and
+      // shrink a little to stay visible above it. The Earth–ship scene keeps its own framing.
+      const portrait = Math.max(0, Math.min(1, (0.85 - aspect) / 0.3)) * (1 - earthW);
+      const fitScale = 1 - 0.22 * portrait;
+      group.scale.setScalar(fitScale);
+      group.position.y = -MID_Y * fitScale + 0.52 * portrait;
+      const fit = 1 + (earthSceneFit(aspect) - 1) * earthW;
       camera.position.set(mx * 0.18, my * 0.12, rig.camZ * fit);
       camera.lookAt(0, 0, 0);
 

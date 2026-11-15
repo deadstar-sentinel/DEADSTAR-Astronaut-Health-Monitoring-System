@@ -2,9 +2,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ChevronDown, Play, Square } from "lucide-react";
-import { EARTH_X, ParticleStage, SHIP_X, type StageRig } from "./ParticleStage.tsx";
+import { EARTH_CAM_Z, EARTH_X, ParticleStage, SHIP_X, earthSceneFit, type StageRig } from "./ParticleStage.tsx";
 
 gsap.registerPlugin(ScrollTrigger);
+
+/** Phones and tablets: there is no cursor, so the copy talks about touch. */
+const COARSE_POINTER = typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)").matches);
 
 /* ------------------------------------------------------------------ live numbers (fallbacks = today's values) */
 interface Story {
@@ -102,8 +105,8 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
   useEffect(() => {
     const place = () => {
       const aspect = window.innerWidth / window.innerHeight;
-      const fit = aspect < 1.25 ? 1 + (1.25 - aspect) * 1.6 : 1;
-      const halfH = 7.4 * fit * Math.tan((34 * Math.PI) / 360);
+      const fit = earthSceneFit(aspect);
+      const halfH = EARTH_CAM_Z * fit * Math.tan((34 * Math.PI) / 360);
       const halfW = halfH * aspect;
       const fx = (x: number) => 50 + (x / (2 * halfW)) * 100;
       setGeo({ earthX: fx(EARTH_X), earthY: 50 + (0.78 / (2 * halfH)) * 100 + 4, shipX: fx(SHIP_X), shipY: 50 + (0.2 / (2 * halfH)) * 100 + 4 });
@@ -328,7 +331,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                   {title.split("").map((c, i) => (<span key={i} className="ch inline-block">{c}</span>))}
                 </h1>
                 <p className="hero-sub mt-5 text-xl sm:text-3xl text-white font-medium leading-snug">The flight surgeon that doesn't wait for Earth.</p>
-                <p className="hero-sub mt-3 text-sm sm:text-base text-slate-300 max-w-md">An autonomous medical officer and living digital twin for crews beyond the reach of real-time help. Move your cursor through the hologram: it is live.</p>
+                <p className="hero-sub mt-3 text-sm sm:text-base text-slate-300 max-w-md">An autonomous medical officer and living digital twin for crews beyond the reach of real-time help. {COARSE_POINTER ? "Touch and drag across the hologram: it is live." : "Move your cursor through the hologram: it is live."}</p>
                 <div className="hero-sub mt-7 flex flex-wrap items-center gap-3">
                   <span className="inline-flex items-center gap-2 px-3 py-1.5 border border-cyan-400/30 bg-cyan-400/5 text-[12px] font-mono text-cyan-100">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> LIVE · crew → Earth light time now: {s.owltMin.toFixed(1)} min
@@ -344,8 +347,9 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                   <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Help is a <span className="text-cyan-300">light-speed</span> round trip away.</h2>
                 </div>
                 <div className="absolute inset-0 text-[11px] font-mono uppercase tracking-[0.2em]">
-                  <span className="rv absolute -translate-x-1/2 text-center text-sky-300" style={{ left: `${geo.earthX}%`, top: `${geo.earthY}%` }}>Earth<br /><span className="text-slate-400">flight surgeon</span></span>
-                  <span className="rv absolute -translate-x-1/2 text-center text-rose-300" style={{ left: `${geo.shipX}%`, top: `${geo.shipY}%` }}>Crew<br /><span className="text-slate-400 whitespace-nowrap">Mars transit · day {s.day}/{s.duration}</span></span>
+                  {/* Centred under each body on wide screens; pinned to the screen edge on phones so they never clip. */}
+                  <span className="rv absolute text-center text-sky-300 max-sm:text-left max-sm:!left-4 max-sm:translate-x-0 -translate-x-1/2" style={{ left: `${geo.earthX}%`, top: `${geo.earthY}%` }}>Earth<br /><span className="text-slate-400">flight surgeon</span></span>
+                  <span className="rv absolute text-center text-rose-300 max-sm:text-right max-sm:!left-auto max-sm:right-4 max-sm:translate-x-0 -translate-x-1/2" style={{ left: `${geo.shipX}%`, top: `${geo.shipY}%` }}>Crew<br /><span className="text-slate-400 sm:whitespace-nowrap">Mars transit · day {s.day}/{s.duration}</span></span>
                 </div>
                 <div>
                   <div className="rv flex items-end justify-center gap-3">
@@ -455,7 +459,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
               ))}
             </nav>
             <div className="hint pointer-events-none absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 text-[10px] font-mono tracking-[0.3em] text-slate-300">
-              SCROLL · OR PRESS →
+              {COARSE_POINTER ? "SWIPE UP" : "SCROLL · OR PRESS →"}
               <ChevronDown className="hint-chev w-4 h-4 text-cyan-300" />
             </div>
           </div>
