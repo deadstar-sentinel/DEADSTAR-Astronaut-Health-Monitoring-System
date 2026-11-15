@@ -7,6 +7,7 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 import { TOUR } from "../src/data/tourScript.ts";
 import { FILM_MINUTES_RANGE, filmLightLine, filmLines } from "../src/data/filmScript.ts";
 import { textKey } from "../src/utils/textKey.ts";
+import { allVoiceReplies } from "../src/data/voiceReplies.ts";
 
 const VOICE = "en-GB-SoniaNeural";
 const OUT = path.resolve("public/narration");
@@ -19,6 +20,7 @@ for (const s of TOUR) {
   lines.add(s.simple);
   lines.add(s.expert);
 }
+for (const l of allVoiceReplies()) lines.add(l);
 
 async function synth(text) {
   const tts = new MsEdgeTTS();
@@ -26,6 +28,8 @@ async function synth(text) {
   const { audioStream } = tts.toStream(text, { rate: "-4%" });
   const chunks = [];
   await new Promise((res, rej) => {
+    // Some service streams never end: give up after 20 s and retry.
+    setTimeout(() => rej(new Error("timeout")), 20000);
     audioStream.on("data", (c) => chunks.push(c));
     audioStream.on("end", res);
     audioStream.on("close", res);

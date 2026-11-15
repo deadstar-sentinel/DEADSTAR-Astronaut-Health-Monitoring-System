@@ -6,6 +6,7 @@ import { TourEndCard } from "./components/TourEndCard.tsx";
 import { HELP_LINES, parseCommand } from "./utils/commandParser.ts";
 import { setSoundEnabled, sfx, soundEnabled } from "./utils/sound.ts";
 import { prefetch, speak, stopSpeaking, unlockAudio } from "./utils/narrator.ts";
+import { VOICE } from "./data/voiceReplies.ts";
 import { TOUR, readMs, type Audience, type TourAction } from "./data/tourScript.ts";
 import { ANATOMY_BY_ID, VISUALIZATION_MODES } from "./data/anatomyCatalog.ts";
 import { SEVERITY_META, severityHex } from "./data/emergencyScenarios.ts";
@@ -78,6 +79,9 @@ import type { EmergencyVisualState } from "./three/emergencyEngine.ts";
 import { EmergencyLeftPanel } from "./components/emergency/EmergencyLeftPanel.tsx";
 import { EmergencyRightPanel } from "./components/emergency/EmergencyRightPanel.tsx";
 import { EmergencyTimelineBar } from "./components/emergency/EmergencyTimelineBar.tsx";
+
+/** A hidden console line: what LIFELINE says out loud (pre-recorded in the narrator's voice). */
+const say = (text: string): ConsoleLine => ({ kind: "say", text });
 
 export default function App() {
   const [state, setState] = useState<SimulationState>(() => createInitialSimulationState());
@@ -384,7 +388,7 @@ export default function App() {
       const active = em.activeScenarioId ? EMERGENCY_BY_ID[em.activeScenarioId] : null;
       switch (a.kind) {
         case "help":
-          return HELP_LINES.map(([c, d]) => ({ kind: "info" as const, text: `${c.padEnd(40)} ${d}` }));
+          return [...HELP_LINES.map(([c, d]) => ({ kind: "info" as const, text: `${c.padEnd(40)} ${d}` })), say(VOICE.help)];
         case "status": {
           const st = stateRef.current;
           const lines: ConsoleLine[] = [
@@ -396,21 +400,21 @@ export default function App() {
               text: `Emergency: ${active.name} · L${em.stage} ${SEVERITY_META[em.stage].label} · ${active.stages[Math.min(em.stage, active.stages.length - 1)]}${em.paused ? " · PAUSED" : ""} · view ${em.view}`,
             });
           } else lines.push({ kind: "info", text: em.modeOpen ? "Emergency mode open, no scenario running." : "No emergency running." });
-          lines.push({ kind: "info", text: "All values are simulated demonstration data." });
+          lines.push({ kind: "info", text: "All values are simulated demonstration data." }, say(VOICE.status));
           return lines;
         }
         case "clear":
           return [];
         case "demo":
           window.setTimeout(() => startDemoRef.current(), 50);
-          return [{ kind: "ok", text: "Starting the guided tour. Click anywhere to take control." }];
+          return [{ kind: "ok", text: "Starting the guided tour. Tap the scene or press Space to pause; your place is saved." }];
         case "scan":
           handleViewportSelectOrgan(a.organ, true);
-          return [{ kind: "ok", text: `Focusing ${ANATOMY_BY_ID[a.organ].name}.` }];
+          return [{ kind: "ok", text: `Focusing ${ANATOMY_BY_ID[a.organ].name}.` }, say(VOICE.scan(ANATOMY_BY_ID[a.organ].name))];
         case "isolate":
           setState((prev) => ({ ...selectOrgan(prev, a.organ), isolated: true }));
           viewportRef.current?.focusOnOrgan(a.organ, true);
-          return [{ kind: "ok", text: `Isolating ${ANATOMY_BY_ID[a.organ].name}. Type RESET VIEW or press Esc to restore.` }];
+          return [{ kind: "ok", text: `Isolating ${ANATOMY_BY_ID[a.organ].name}. Type RESET VIEW or press Esc to restore.` }, say(VOICE.isolate(ANATOMY_BY_ID[a.organ].name))];
         case "simulate": {
           const s = EMERGENCY_BY_ID[a.scenarioId];
           simulate(a.scenarioId, a.severity);
@@ -421,36 +425,36 @@ export default function App() {
           ];
         }
         case "severity":
-          if (!active) return [{ kind: "warn", text: "No emergency running. Try SIMULATE HYPOXIA first." }];
+          if (!active) return [{ kind: "warn", text: "No emergency running. Try SIMULATE HYPOXIA first." }, say(VOICE.noEmergency)];
           setEmergency((prev) => setEmergencyStage(prev, a.level));
-          return [{ kind: "ok", text: `Severity set to L${Math.min(a.level, active.stages.length - 1)}.` }];
+          return [{ kind: "ok", text: `Severity set to L${Math.min(a.level, active.stages.length - 1)}.` }, say(VOICE.severity(Math.min(a.level, active.stages.length - 1)))];
         case "step":
-          if (!active) return [{ kind: "warn", text: "No emergency running." }];
+          if (!active) return [{ kind: "warn", text: "No emergency running." }, say(VOICE.noEmergency)];
           setEmergency((prev) => stepEmergencyStage(prev, a.delta));
-          return [{ kind: "ok", text: a.delta > 0 ? "Escalating one stage." : "De-escalating one stage." }];
+          return [{ kind: "ok", text: a.delta > 0 ? "Escalating one stage." : "De-escalating one stage." }, say(a.delta > 0 ? VOICE.up : VOICE.down)];
         case "reset":
           if (!active) {
             setState((prev) => restoreCompleteBody(selectOrgan(prev, null)));
             viewportRef.current?.focusCameraPreset("reset");
-            return [{ kind: "ok", text: "View reset to the full body." }];
+            return [{ kind: "ok", text: "View reset to the full body." }, say(VOICE.resetView)];
           }
           setEmergency((prev) => stopEmergency(prev));
-          return [{ kind: "ok", text: `${active.name} reset. Anatomy recovering to normal.` }];
+          return [{ kind: "ok", text: `${active.name} reset. Anatomy recovering to normal.` }, say(VOICE.resetEmergency)];
         case "pause":
           setEmergency((prev) => setEmergencyPaused(prev, a.paused));
-          return [{ kind: "ok", text: a.paused ? "Simulation paused." : "Simulation resumed." }];
+          return [{ kind: "ok", text: a.paused ? "Simulation paused." : "Simulation resumed." }, say(a.paused ? VOICE.pause : VOICE.resume)];
         case "view":
           setEmergency((prev) => setEmergencyView(prev, a.view));
-          return [{ kind: "ok", text: `View: ${a.view}.` }];
+          return [{ kind: "ok", text: `View: ${a.view}.` }, say(a.view === "compare" ? VOICE.viewCompare : a.view === "normal" ? VOICE.viewNormal : VOICE.viewEmergency)];
         case "suit":
           handleToggleSuitMode(a.on);
-          return [{ kind: "ok", text: a.on ? "Astronaut spacesuit on." : "Normal human anatomy." }];
+          return [{ kind: "ok", text: a.on ? "Astronaut spacesuit on." : "Normal human anatomy." }, say(a.on ? VOICE.suitOn : VOICE.suitOff)];
         case "mode":
           handleSelectMode(a.mode);
-          return [{ kind: "ok", text: `Mode: ${VISUALIZATION_MODES.find((m) => m.id === a.mode)?.label ?? a.mode}.` }];
+          return [{ kind: "ok", text: `Mode: ${VISUALIZATION_MODES.find((m) => m.id === a.mode)?.label ?? a.mode}.` }, say(VOICE.mode(a.mode))];
         case "emergency":
           handleToggleEmergency(a.on);
-          return [{ kind: "ok", text: a.on ? "Emergency simulation mode open." : "Emergency simulation mode closed." }];
+          return [{ kind: "ok", text: a.on ? "Emergency simulation mode open." : "Emergency simulation mode closed." }, say(a.on ? VOICE.emergencyOn : VOICE.emergencyOff)];
         default:
           return [
             { kind: "err", text: `Not understood: "${a.text}". Type HELP for commands.` },
@@ -598,6 +602,8 @@ export default function App() {
         case "finish":
           setEmergency((prev) => setEmergencyModeOpen(prev, false));
           setState((prev) => selectOrgan(prev, null));
+          // Point straight at the agent: the console (with its mic) opens as the narrator mentions it.
+          setConsoleOpen(true);
           break;
       }
     },
@@ -1060,6 +1066,7 @@ export default function App() {
       {demo && (
         <DemoOverlay
           demo={demo}
+          raised={consoleOpen}
           onStop={stopDemo}
           onPause={pauseDemo}
           onResume={resumeDemo}

@@ -117,9 +117,9 @@ export const TOUR: TourShot[] = [
     shot: { focus: { kind: "body" }, distance: 3.6, azimuth: 0, elevation: 4, duration: 3 },
     minMs: 5500,
     simple:
-      "Everything you see is clearly marked as simulated, measured, or predicted. Now it's your turn. Tap any organ, or just ask me.",
+      "Everything you see is clearly marked as simulated, measured, or predicted. Now it's your turn. Tap any organ, or ask me right here in the console. Type it, or press the microphone and just say it, like: show me a blood clot.",
     expert:
-      "Every value is labelled simulated, measured or predicted, and every scenario carries its evidence class. The system is yours: select any structure, or command it by voice or text.",
+      "Every value is labelled simulated, measured or predicted, and every scenario carries its evidence class. The system is yours: select any structure, or command me in this console, by text or by voice. Try: simulate hypoxia, severity three.",
   },
 ];
 

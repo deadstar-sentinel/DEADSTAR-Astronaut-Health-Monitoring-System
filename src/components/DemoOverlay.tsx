@@ -28,7 +28,10 @@ export function DemoOverlay({
   onResume,
   onRestart,
   onToggleVoice,
+  raised = false,
 }: {
+  /** Lift the card above the command console when it is open. */
+  raised?: boolean;
   demo: DemoState;
   onStop: () => void;
   onPause: () => void;
@@ -52,7 +55,7 @@ export function DemoOverlay({
         data-demo-overlay
         data-testid="demo-overlay"
         data-paused={paused ? "true" : "false"}
-        className={`pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-3 sm:px-4 ${paused ? "bottom-3" : "bottom-[7vh]"}`}
+        className={`pointer-events-none fixed inset-x-0 z-[70] flex justify-center px-3 sm:px-4 ${raised ? "bottom-[300px]" : paused ? "bottom-3" : "bottom-[7vh]"}`}
       >
         <div
           key={demo.step}

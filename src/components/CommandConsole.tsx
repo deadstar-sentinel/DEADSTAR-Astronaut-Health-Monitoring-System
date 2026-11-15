@@ -3,16 +3,8 @@ import { ChevronRight, Mic, X } from "lucide-react";
 import { sfx } from "../utils/sound.ts";
 import { listenOnce, listeningSupported, speakIfRecorded } from "../utils/narrator.ts";
 
-/** Turn console output into one or two warm spoken sentences. */
-function spokenReply(lines: ConsoleLine[]): string {
-  const ok = lines.filter((l) => l.kind === "ok" || l.kind === "warn" || l.kind === "err").map((l) => l.text);
-  const info = lines.filter((l) => l.kind === "info").map((l) => l.text);
-  const first = ok[0] ?? info[0] ?? "";
-  const extra = ok.length && info[0] && info[0].length < 220 ? ` ${info[0]}` : "";
-  return `${first}${extra}`.replace(/\bL(\d)\b/g, "level $1").replace(/CO₂/g, "C O 2");
-}
-
-export type ConsoleLineKind = "cmd" | "ok" | "info" | "warn" | "err";
+/** "say" lines are never shown: they are what LIFELINE speaks, in the narrator's recorded voice. */
+export type ConsoleLineKind = "cmd" | "ok" | "info" | "warn" | "err" | "say";
 export interface ConsoleLine {
   kind: ConsoleLineKind;
   text: string;
@@ -41,6 +33,7 @@ const KIND_CLASS: Record<ConsoleLineKind, string> = {
   info: "text-slate-300",
   warn: "text-amber-300",
   err: "text-rose-300",
+  say: "hidden",
 };
 
 export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: Props) {
@@ -79,7 +72,8 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
     });
   };
 
-  const run = (text: string, spoken = false) => {
+  /** Typed or spoken requests get a spoken answer; one-click chips stay quiet. */
+  const run = (text: string, spoken = false, talk = true) => {
     const t = text.trim();
     if (!t) return;
     sfx.key();
@@ -90,12 +84,14 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
       setLines([]);
       return;
     }
-    const out = onRun(t);
+    const all = onRun(t);
+    const out = all.filter((l) => l.kind !== "say");
+    const reply = all.find((l) => l.kind === "say")?.text;
     const echo: ConsoleLine = { kind: "cmd", text: spoken ? `🎙 ${t}` : t };
     setLines((l) => [...l, echo, ...out].slice(-160));
-    // Replies are spoken only when a recorded (Sonia) line exists; live text would fall back to the
-    // robotic browser voice, so it stays on screen instead of clashing with the narrator.
-    if (spoken) void speakIfRecorded(spokenReply(out));
+    // Every reply is pre-recorded in the narrator's voice (src/data/voiceReplies.ts);
+    // speakIfRecorded keeps any unrecorded text silent rather than robotic.
+    if (reply && (spoken || talk)) void speakIfRecorded(reply);
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -160,7 +156,7 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
             <button
               key={c}
               type="button"
-              onClick={() => run(c)}
+              onClick={() => run(c, false, false)}
               className="sx-press px-1.5 py-0.5 border text-[10px] font-mono text-slate-200 hover:text-white bg-white/[0.03]"
               style={{ borderColor: `${accent}55` }}
             >
