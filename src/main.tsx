@@ -6,11 +6,15 @@ import { BootOverlay, Landing } from "./sentinel/Landing.tsx";
 
 const KEY = "sentinel-entered";
 
-/** Cinematic scroll intro first (once per session), then a boot reveal into mission control. #app skips the intro. */
+/** Cinematic scroll intro first (once per session), then a boot reveal into mission control. #app or /twin skips the intro. */
 function Root() {
   const [entered, setEntered] = useState(() => {
     try {
-      return window.location.hash === "#app" || sessionStorage.getItem(KEY) === "1";
+      return (
+        window.location.hash === "#app" ||
+        window.location.pathname === "/twin" ||
+        sessionStorage.getItem(KEY) === "1"
+      );
     } catch {
       return false;
     }

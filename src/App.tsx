@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, PanelLeft, PanelRight, RotateCcw } from "lucide-react";
 import type {
   AnatomyId,
@@ -41,6 +41,34 @@ import { SpacesuitTelemetryModal } from "./components/SpacesuitTelemetryModal.ts
 import { SentinelProvider } from "./sentinel/api.tsx";
 import { MissionBar } from "./sentinel/MissionBar.tsx";
 import { SafeBoundary } from "./sentinel/SafeBoundary.tsx";
+import {
+  EMERGENCY_BY_ID,
+  EMERGENCY_CATEGORY_BY_ID,
+  categoryForOrgan,
+  type EmergencyCategoryId,
+  type EmergencyScenario,
+} from "./data/emergencyScenarios.ts";
+import {
+  activateScenario,
+  advanceTimeline,
+  createInitialEmergencyState,
+  displayedLevel,
+  previewScenario,
+  selectEmergencyCategory,
+  setEmergencyModeOpen,
+  setEmergencyPaused,
+  setEmergencyStage,
+  setEmergencyView,
+  stepEmergencyStage,
+  stopEmergency,
+  timelineFinished,
+  type EmergencyState,
+  type EmergencyView,
+} from "./utils/emergencyState.ts";
+import type { EmergencyVisualState } from "./three/emergencyEngine.ts";
+import { EmergencyLeftPanel } from "./components/emergency/EmergencyLeftPanel.tsx";
+import { EmergencyRightPanel } from "./components/emergency/EmergencyRightPanel.tsx";
+import { EmergencyTimelineBar } from "./components/emergency/EmergencyTimelineBar.tsx";
 
 export default function App() {
   const [state, setState] = useState<SimulationState>(() => createInitialSimulationState());
@@ -52,6 +80,13 @@ export default function App() {
   const [externalPrompt, setExternalPrompt] = useState<{ id: number; text: string } | null>(null);
   const viewportRef = useRef<AnatomyViewportHandle | null>(null);
   const telemetryPhaseRef = useRef(0);
+  const [emergency, setEmergency] = useState<EmergencyState>(() => createInitialEmergencyState());
+  const emergencyOpenRef = useRef(false);
+  emergencyOpenRef.current = emergency.modeOpen;
+  const pickedMeshRef = useRef<string | null>(null);
+  const suitLinkedRef = useRef(false);
+  const suitScenarioRef = useRef(state.suitScenarioId);
+  suitScenarioRef.current = state.suitScenarioId;
 
   // Sync live simulated telemetry when scenario changes or simulation ticks
   useEffect(() => {
@@ -191,6 +226,125 @@ export default function App() {
     setRightOpen(true);
   }, []);
 
+  /* ---------------- Spaceflight Emergency Simulation (third interaction mode) ---------------- */
+
+  const handleToggleEmergency = useCallback((open: boolean) => {
+    setEmergency((prev) => setEmergencyModeOpen(prev, open));
+  }, []);
+
+  // Clicking the body in Emergency mode opens that organ's scenario directory.
+  const handleViewportSelectOrgan = useCallback(
+    (id: AnatomyId | null, focusZoom: boolean) => {
+      handleSelectOrgan(id, focusZoom);
+      if (emergencyOpenRef.current && id) {
+        const cat = categoryForOrgan(id, pickedMeshRef.current);
+        if (cat) setEmergency((prev) => selectEmergencyCategory(prev, cat));
+      }
+      pickedMeshRef.current = null;
+    },
+    [handleSelectOrgan],
+  );
+
+  const handleEmergencySelectCategory = useCallback((id: EmergencyCategoryId) => {
+    setEmergency((prev) => selectEmergencyCategory(prev, id));
+  }, []);
+
+  const handlePreviewScenario = useCallback((id: string) => {
+    setEmergency((prev) => {
+      const s = EMERGENCY_BY_ID[id];
+      if (!s) return prev;
+      const next = previewScenario(prev, id);
+      // Keep the open directory if it lists this scenario (SANS appears under Neuro and Eyes).
+      const listed = EMERGENCY_CATEGORY_BY_ID[next.categoryId].scenarioIds.includes(id);
+      return listed ? next : selectEmergencyCategory(next, s.category);
+    });
+    setRightOpen(true);
+  }, []);
+
+  const focusScenario = useCallback((s: EmergencyScenario) => {
+    if (viewportRef.current?.focusOnEmergency()) return;
+    if (s.fx.primary) viewportRef.current?.focusOnOrgan(s.fx.primary, false);
+    else viewportRef.current?.focusCameraPreset("reset");
+  }, []);
+
+  const handleActivateScenario = useCallback((id: string) => {
+    if (!EMERGENCY_BY_ID[id]) return;
+    setEmergency((prev) => activateScenario(prev, id, Date.now(), suitScenarioRef.current));
+  }, []);
+
+  // Frame the affected region once the 3D engine has the scenario (child effects run first).
+  useEffect(() => {
+    const s = emergency.activeScenarioId ? EMERGENCY_BY_ID[emergency.activeScenarioId] : null;
+    if (s) focusScenario(s);
+  }, [emergency.activeScenarioId, focusScenario]);
+
+  const handleStopEmergency = useCallback(() => {
+    setEmergency((prev) => stopEmergency(prev));
+  }, []);
+
+  const handleIsolateScenario = useCallback((s: EmergencyScenario) => {
+    const primary = s.fx.primary;
+    if (!primary) return;
+    setState((prev) => ({ ...selectOrgan(prev, primary), isolated: true }));
+    viewportRef.current?.focusOnOrgan(primary, true);
+  }, []);
+
+  const handleEmergencyFullBody = useCallback(() => {
+    setState((prev) => restoreCompleteBody(selectOrgan(prev, null)));
+    viewportRef.current?.focusCameraPreset("reset");
+  }, []);
+
+  // Timeline: auto-advance one illustrative stage at a time until the last stage.
+  useEffect(() => {
+    if (!emergency.activeScenarioId || emergency.paused || timelineFinished(emergency)) return;
+    const id = window.setTimeout(() => setEmergency((prev) => advanceTimeline(prev)), 3800);
+    return () => window.clearTimeout(id);
+  }, [emergency]);
+
+  // Astronaut mode: respiratory emergencies drive the existing suit AI-monitoring telemetry.
+  useEffect(() => {
+    const s = emergency.activeScenarioId ? EMERGENCY_BY_ID[emergency.activeScenarioId] : null;
+    const linked = s?.suitScenario ?? null;
+    if (linked && state.suitActive) {
+      if (state.suitScenarioId !== linked) {
+        suitLinkedRef.current = true;
+        setState((prev) => setSuitScenario(prev, linked));
+      }
+    } else if (!linked && suitLinkedRef.current) {
+      suitLinkedRef.current = false;
+      const restore = emergency.suitScenarioBefore ?? "nominal";
+      setState((prev) => setSuitScenario(prev, restore));
+    }
+  }, [emergency.activeScenarioId, emergency.suitScenarioBefore, state.suitActive, state.suitScenarioId]);
+
+  const emergencyVisual = useMemo<EmergencyVisualState | null>(() => {
+    if (!emergency.modeOpen) return null;
+    const id = emergency.activeScenarioId ?? emergency.selectedScenarioId;
+    const scenario = id ? EMERGENCY_BY_ID[id] : null;
+    if (!scenario) return null;
+    return {
+      scenario,
+      level: displayedLevel(emergency),
+      preview: !emergency.activeScenarioId,
+      view: emergency.view,
+      paused: emergency.paused,
+    };
+  }, [emergency]);
+
+  const emergencyHud = useMemo(() => {
+    if (!emergency.modeOpen) return null;
+    const s = emergency.activeScenarioId ? EMERGENCY_BY_ID[emergency.activeScenarioId] : null;
+    if (!s) return { name: "", level: 0, stageLabel: "", view: emergency.view, active: false };
+    const level = displayedLevel(emergency);
+    return {
+      name: s.name,
+      level,
+      stageLabel: s.stages[Math.min(emergency.stage, s.stages.length - 1)],
+      view: emergency.view,
+      active: true,
+    };
+  }, [emergency]);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -233,10 +387,16 @@ export default function App() {
             <h1 className="text-sm font-semibold tracking-[0.16em] uppercase text-white truncate">
               DEADSTAR SENTINEL
             </h1>
-            <span className="hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-400 truncate">
-              {state.suitActive
-                ? "AI Anatomy & Smart EVA Spacesuit Platform"
-                : "3D Medical Anatomy Simulation"}
+            <span
+              className={`hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] truncate ${
+                emergency.modeOpen ? "text-rose-300" : "text-cyan-400"
+              }`}
+            >
+              {emergency.modeOpen
+                ? `Spaceflight Emergency Simulation${state.suitActive ? " · Astronaut Mode" : ""}`
+                : state.suitActive
+                  ? "AI Anatomy & Smart EVA Spacesuit Platform"
+                  : "3D Medical Anatomy Simulation"}
             </span>
           </div>
         </div>
@@ -290,6 +450,18 @@ export default function App() {
 
       {/* Main 3-Column Medical & Astronaut Spacesuit Simulation Workspace */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden">
+        {emergency.modeOpen ? (
+          <EmergencyLeftPanel
+            emergency={emergency}
+            isOpen={leftOpen}
+            onCloseMobile={() => setLeftOpen(false)}
+            onSelectCategory={handleEmergencySelectCategory}
+            onPreviewScenario={(id) => {
+              handlePreviewScenario(id);
+              setLeftOpen(false);
+            }}
+          />
+        ) : (
         <LeftControlPanel
           state={state}
           isOpen={leftOpen}
@@ -308,19 +480,40 @@ export default function App() {
           onChangeThermalIntensity={handleChangeThermalIntensity}
           onToggleDisplay={handleToggleDisplay}
         />
+        )}
 
         <AnatomyViewport
           ref={viewportRef}
           state={state}
           telemetrySnapshot={telemetrySnapshot}
-          onSelectOrgan={handleSelectOrgan}
+          onSelectOrgan={handleViewportSelectOrgan}
           onSelectSuitComponent={handleSelectSuitComponent}
           onToggleSuitMode={handleToggleSuitMode}
           onChangeExplodeProgress={handleChangeExplodeProgress}
           onRestoreSuit={handleRestoreBody}
           onOpenTelemetryHud={handleOpenMonitoringHud}
+          emergencyOpen={emergency.modeOpen}
+          onToggleEmergency={handleToggleEmergency}
+          emergencyVisual={emergencyVisual}
+          emergencyHud={emergencyHud}
+          onPickMesh={(name) => {
+            pickedMeshRef.current = name;
+          }}
         />
 
+        {emergency.modeOpen ? (
+          <EmergencyRightPanel
+            emergency={emergency}
+            suitActive={state.suitActive}
+            isOpen={rightOpen}
+            onCloseMobile={() => setRightOpen(false)}
+            onActivate={handleActivateScenario}
+            onStop={handleStopEmergency}
+            onFocus={focusScenario}
+            onIsolate={handleIsolateScenario}
+            onPreviewScenario={handlePreviewScenario}
+          />
+        ) : (
         <RightInspectorPanel
           state={state}
           telemetrySnapshot={telemetrySnapshot}
@@ -335,16 +528,37 @@ export default function App() {
           onFocusSuitComponent={(id) => viewportRef.current?.focusOnSuitComponent(id, true)}
           onOpenMonitoringHud={handleOpenMonitoringHud}
         />
+        )}
       </main>
 
-      <BottomControlBar
-        state={state}
-        telemetrySnapshot={telemetrySnapshot}
-        onCameraPreset={handleCameraPreset}
-        onChangeIntensity={handleChangeIntensity}
-        onChangeAnimationMode={handleChangeAnimationMode}
-        onOpenTelemetryHud={handleOpenMonitoringHud}
-      />
+      {emergency.modeOpen ? (
+        <EmergencyTimelineBar
+          emergency={emergency}
+          suitActive={state.suitActive}
+          isolated={state.isolated}
+          onSetStage={(s) => setEmergency((prev) => setEmergencyStage(prev, s))}
+          onStep={(d) => setEmergency((prev) => stepEmergencyStage(prev, d))}
+          onTogglePause={() => setEmergency((prev) => setEmergencyPaused(prev, !prev.paused))}
+          onReset={handleStopEmergency}
+          onView={(v: EmergencyView) => setEmergency((prev) => setEmergencyView(prev, v))}
+          onIsolate={() => {
+            const s = emergency.activeScenarioId ? EMERGENCY_BY_ID[emergency.activeScenarioId] : null;
+            if (s) handleIsolateScenario(s);
+          }}
+          onFullBody={handleEmergencyFullBody}
+          onToggleSuit={handleToggleSuitMode}
+          onCameraPreset={handleCameraPreset}
+        />
+      ) : (
+        <BottomControlBar
+          state={state}
+          telemetrySnapshot={telemetrySnapshot}
+          onCameraPreset={handleCameraPreset}
+          onChangeIntensity={handleChangeIntensity}
+          onChangeAnimationMode={handleChangeAnimationMode}
+          onOpenTelemetryHud={handleOpenMonitoringHud}
+        />
+      )}
 
       <SpacesuitTelemetryModal
         isOpen={state.monitoringDashboardOpen}

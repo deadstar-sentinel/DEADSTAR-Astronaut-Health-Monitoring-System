@@ -154,6 +154,21 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 input[type="range"] { transition: filter 0.2s ease; }
 input[type="range"]:hover { filter: drop-shadow(0 0 6px rgba(103, 232, 249, 0.7)); }
 
+.sx-press:not(:disabled):active { scale: 0.985; }
+
+/* ============================================================ Spaceflight Emergency Simulation */
+@keyframes sx-em-ping { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.65); opacity: 0; } }
+@keyframes sx-em-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 49, 88, 0); } 50% { box-shadow: 0 0 18px 2px rgba(255, 49, 88, 0.38); } }
+@keyframes sx-em-vignette { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes sx-em-dash { to { stroke-dashoffset: -16; } }
+.sx-em-ping { animation: sx-em-ping 1.8s ease-out infinite; }
+.sx-em-cta { animation: sx-em-glow 2.2s ease-in-out infinite; }
+.sx-em-vignette { box-shadow: inset 0 0 140px 14px rgba(255, 49, 88, 0.5); animation: sx-em-vignette 1.1s ease-in-out infinite; }
+.sx-em-vignette.sx-em-calm { box-shadow: inset 0 0 110px 0 rgba(255, 49, 88, 0.26); animation-duration: 2.6s; }
+.sx-em-lead { stroke-dasharray: 4 4; animation: sx-em-dash 0.8s linear infinite; }
+.sx-em-btn { background-image: linear-gradient(90deg, rgba(255, 49, 88, 0.16), rgba(0, 229, 255, 0.1)); }
+.sx-em-btn[aria-pressed="true"] { background-image: linear-gradient(90deg, rgba(255, 49, 88, 0.42), rgba(0, 229, 255, 0.18)); animation: sx-em-glow 2.2s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }

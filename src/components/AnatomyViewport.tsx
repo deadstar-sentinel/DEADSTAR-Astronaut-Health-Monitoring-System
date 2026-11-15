@@ -1,5 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { Activity, Layers, RotateCcw, Shield, User } from "lucide-react";
+import { Activity, Layers, RotateCcw, Shield, Siren, User } from "lucide-react";
+import type { EmergencyVisualState } from "../three/emergencyEngine.ts";
+import { SEVERITY_META, severityHex } from "../data/emergencyScenarios.ts";
 import type { AnatomyId, CameraPresetId } from "../data/anatomyCatalog.ts";
 import type { SuitComponentId } from "../data/spacesuitCatalog.ts";
 import type { SuitTelemetrySnapshot } from "../utils/telemetryEngine.ts";
@@ -17,6 +19,8 @@ export interface AnatomyViewportHandle {
   focusCameraPreset: (preset: CameraPresetId) => void;
   focusOnOrgan: (organId: AnatomyId, closeZoom?: boolean) => void;
   focusOnSuitComponent: (componentId: SuitComponentId, closeZoom?: boolean) => void;
+  /** Returns false when no emergency anchor is available yet. */
+  focusOnEmergency: (closeZoom?: boolean) => boolean;
 }
 
 interface AnatomyViewportProps {
@@ -32,6 +36,12 @@ interface AnatomyViewportProps {
   onChangeExplodeProgress: (val: number) => void;
   onRestoreSuit: () => void;
   onOpenTelemetryHud: () => void;
+  /** Third interaction mode: Spaceflight Emergency Simulation. */
+  emergencyOpen: boolean;
+  onToggleEmergency: (open: boolean) => void;
+  emergencyVisual: EmergencyVisualState | null;
+  emergencyHud: { name: string; level: number; stageLabel: string; view: string; active: boolean } | null;
+  onPickMesh?: (meshName: string) => void;
 }
 
 export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewportProps>(
@@ -45,6 +55,11 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
       onChangeExplodeProgress,
       onRestoreSuit,
       onOpenTelemetryHud,
+      emergencyOpen,
+      onToggleEmergency,
+      emergencyVisual,
+      emergencyHud,
+      onPickMesh,
     },
     ref,
   ) {
@@ -54,6 +69,10 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
     onSelectOrganRef.current = onSelectOrgan;
     const onSelectSuitRef = useRef(onSelectSuitComponent);
     onSelectSuitRef.current = onSelectSuitComponent;
+    const onPickMeshRef = useRef(onPickMesh);
+    onPickMeshRef.current = onPickMesh;
+    const [emAnchor, setEmAnchor] = useState<{ x: number; y: number; visible: boolean } | null>(null);
+    const [comparePhase, setComparePhase] = useState(1);
 
     const initialStateRef = useRef(state);
 
@@ -80,6 +99,9 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         focusOnSuitComponent(componentId, closeZoom = false) {
           controllerRef.current?.focusOnSuitComponent(componentId, closeZoom);
         },
+        focusOnEmergency(closeZoom = false) {
+          return controllerRef.current?.focusOnEmergency(closeZoom) ?? false;
+        },
       }),
       [],
     );
@@ -97,6 +119,8 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           onSelectSuitRef.current(id, focusZoom, openHud),
         onTelemetry: (t) => setTelemetry(t),
         onLabelsProject: (projected) => setLabels(projected),
+        onPickMesh: (name) => onPickMeshRef.current?.(name),
+        onEmergencyAnchor: (a) => setEmAnchor(a),
       });
 
       controllerRef.current = ctrl;
@@ -113,6 +137,24 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
     useEffect(() => {
       controllerRef.current?.updateTelemetrySnapshot(telemetrySnapshot);
     }, [telemetrySnapshot]);
+
+    useEffect(() => {
+      controllerRef.current?.setEmergency(emergencyVisual);
+    }, [emergencyVisual]);
+
+    // Compare view alternates normal and emergency on the same 2.4 s clock as the 3D engine.
+    const comparing = emergencyHud?.active && emergencyHud.view === "compare";
+    useEffect(() => {
+      if (!comparing) return;
+      const sync = () => setComparePhase(Math.floor(performance.now() / 2400) % 2);
+      sync();
+      const id = window.setInterval(sync, 200);
+      return () => window.clearInterval(id);
+    }, [comparing]);
+
+    const emLevel = emergencyHud?.active ? emergencyHud.level : 0;
+    const emShownLevel = comparing && comparePhase === 0 ? 0 : emLevel;
+    const emColor = severityHex(emShownLevel);
 
     const alertBorderClass =
       state.suitActive && telemetrySnapshot.overallStatus === "critical"
@@ -134,11 +176,82 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         {/* Mode / crew change: a quick scan sweep so every switch feels physical */}
         <div key={`${state.mode}:${state.suitActive}`} className="sx-modeflash pointer-events-none absolute inset-0 z-10" />
 
-        {ready && !state.suitActive && (
+        {/* Vitals step aside while an organ is focused or an emergency is on screen, so the target stays visible */}
+        {ready && !state.suitActive && !emergencyOpen && !state.selectedOrganId && (
           <SafeBoundary label="Vitals">
             <VitalsHud onSelectOrgan={onSelectOrgan} />
           </SafeBoundary>
         )}
+
+        {/* Emergency: perimeter vignette at severe/critical levels */}
+        {emergencyHud?.active && emShownLevel >= 3 && (
+          <div
+            data-testid="emergency-vignette"
+            className={`pointer-events-none absolute inset-0 z-10 sx-em-vignette ${emShownLevel < 4 ? "sx-em-calm" : ""}`}
+          />
+        )}
+
+        {/* Emergency: status badge */}
+        {emergencyOpen && (
+          <div
+            data-testid="emergency-hud"
+            className="pointer-events-none absolute left-3 top-[86px] z-20 hidden sm:block max-w-[280px] border bg-[#0a0710]/90 px-2.5 py-1.5 transition-colors duration-500"
+            style={{ borderColor: `${emColor}88`, boxShadow: emShownLevel >= 3 ? `0 0 22px ${emColor}44` : undefined }}
+          >
+            <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.14em]" style={{ color: emColor }}>
+              <Siren className={`w-3 h-3 ${emShownLevel >= 4 ? "animate-pulse" : ""}`} />
+              {emergencyHud?.active ? `Emergency sim · L${emShownLevel} ${SEVERITY_META[emShownLevel].label}` : "Emergency simulation · standby"}
+            </div>
+            {emergencyHud?.active ? (
+              <>
+                <div className="mt-0.5 text-xs text-white leading-snug">{emergencyHud.name}</div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  {comparing ? (comparePhase === 0 ? "COMPARE · showing NORMAL" : "COMPARE · showing EMERGENCY") : emergencyHud.stageLabel}
+                </div>
+              </>
+            ) : (
+              <div className="mt-0.5 text-[11px] text-slate-300">Click an organ to open its scenarios.</div>
+            )}
+            <div className="mt-1 text-[9px] font-mono tracking-wider text-amber-200/80">SIMULATED DATA · EDUCATIONAL</div>
+          </div>
+        )}
+
+        {/* Emergency: leader line from the affected structure to a floating card */}
+        {ready && emergencyHud?.active && emAnchor?.visible && (() => {
+          const w = mountRef.current?.clientWidth ?? 800;
+          const flip = emAnchor.x > w - 250;
+          const ex = emAnchor.x + (flip ? -64 : 64);
+          const ey = Math.max(70, emAnchor.y - 48);
+          const cardX = flip ? ex - 8 : ex + 8;
+          return (
+            <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-testid="emergency-callout">
+              <svg className="absolute inset-0 w-full h-full">
+                <circle cx={emAnchor.x} cy={emAnchor.y} r={4} fill={emColor} />
+                <circle cx={emAnchor.x} cy={emAnchor.y} r={9} fill="none" stroke={emColor} strokeOpacity={0.5} className={emShownLevel >= 4 ? "animate-pulse" : ""} />
+                <polyline
+                  points={`${emAnchor.x},${emAnchor.y} ${emAnchor.x + (flip ? -18 : 18)},${ey} ${ex},${ey}`}
+                  fill="none"
+                  stroke={emColor}
+                  strokeWidth={1.2}
+                  className="sx-em-lead"
+                />
+              </svg>
+              <div
+                className="absolute px-2 py-1 border bg-[#0a0710]/92 text-[10px] font-mono uppercase tracking-wider whitespace-nowrap"
+                style={{
+                  left: cardX,
+                  top: ey,
+                  transform: `translate(${flip ? "-100%" : "0"}, -50%)`,
+                  borderColor: emColor,
+                  color: emColor,
+                }}
+              >
+                {emergencyHud.name.length > 34 ? `${emergencyHud.name.slice(0, 32)}…` : emergencyHud.name}
+                <span className="ml-1.5 text-white">L{emShownLevel}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* MRI console: the slice image itself is rendered by WebGL into this corner */}
         {ready && state.mode === "mri" && (() => {
@@ -243,6 +356,23 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
           >
             <Shield className="w-3.5 h-3.5 text-violet-400" />
             <span>Astronaut Spacesuit</span>
+          </button>
+          <button
+            type="button"
+            data-testid="emergency-mode-btn"
+            onClick={() => onToggleEmergency(!emergencyOpen)}
+            aria-pressed={emergencyOpen}
+            title="Spaceflight Emergency Simulation: works with both Normal Human and Astronaut modes"
+            className={`sx-em-btn relative px-3 py-1.5 text-[11px] font-mono uppercase tracking-wider flex items-center gap-1.5 whitespace-nowrap border-l border-rose-400/40 ${
+              emergencyOpen ? "text-white" : "text-rose-100/90 hover:text-white"
+            }`}
+          >
+            <span className="relative flex items-center justify-center">
+              <Siren className="w-3.5 h-3.5 text-rose-400" />
+              <span className="sx-em-ping absolute -inset-1 rounded-full border border-cyan-300/60" />
+            </span>
+            <span className="hidden md:inline">Emergency Sim</span>
+            <span className="md:hidden">SOS</span>
           </button>
         </div>
 

@@ -26,9 +26,9 @@ import {
 } from "./simulationState.ts";
 
 describe("simulationState", () => {
-  it("contains all 14 required anatomical structures, 9 visualization modes, and 22 spacesuit components", () => {
+  it("contains all 14 required anatomical structures, 10 visualization modes (incl. MRI), and 22 spacesuit components", () => {
     assert.equal(ANATOMY_CATALOG.length, 14);
-    assert.equal(VISUALIZATION_MODES.length, 9);
+    assert.equal(VISUALIZATION_MODES.length, 10);
     assert.equal(SPACESUIT_CATALOG.length, 22);
 
     const requiredNames = [

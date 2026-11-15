@@ -71,7 +71,7 @@ function Scene({ i, side, children }: { i: number; side: "left" | "right" | "cen
   const align = side === "left" ? "lg:justify-start" : side === "right" ? "lg:justify-end" : "lg:justify-center";
   return (
     <section className={`sc sc-${i} absolute inset-0 flex items-end lg:items-center justify-center ${align} px-6 lg:px-[7vw] ${side === "right" ? "lg:pr-[12vw]" : ""} pb-20 lg:pb-0`} style={i > 0 ? { visibility: "hidden", opacity: 0 } : undefined}>
-      <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : i === 0 ? "lg:max-w-[56vw]" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-0 p-4 lg:p-0`}>{children}</div>
+      <div className={`w-full ${side === "center" ? "max-w-3xl text-center" : i === 0 ? "lg:max-w-[56vw]" : "max-w-xl"} rounded-sm bg-[#02060f]/70 lg:bg-transparent backdrop-blur-sm lg:backdrop-blur-none p-4 lg:p-0`}>{children}</div>
     </section>
   );
 }
@@ -292,7 +292,6 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       gsap.killTweensOf(rig);
       ctx.revert();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleFilm = () => {

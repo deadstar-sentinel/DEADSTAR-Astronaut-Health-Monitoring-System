@@ -106,7 +106,11 @@ app.get(["/crew", "/astronaut"], (_req, res) => res.sendFile(path.join(STATIC, "
 app.get("/holo", (_req, res) => res.sendFile(path.join(STATIC, "holo.html")));
 // Original SENTINEL mission console (ECG, risk matrix, scorecard, PVT guests), linked from the app.
 app.get("/console", (_req, res) => res.sendFile(path.join(STATIC, "index.html")));
-app.get("/twin", (_req, res) => res.sendFile(path.join(ROOT, "index.html")));
+// Direct link into mission control (skips the intro). Serve the production build when present.
+app.get("/twin", (_req, res) => {
+  const distIndex = path.join(DIST, "index.html");
+  res.sendFile(fs.existsSync(distIndex) ? distIndex : path.join(ROOT, "index.html"));
+});
 
 // ----------------------------------------------------------------------------- proposed protocols
 // Immediate action steps for the AI medical officer's answers, ranked by urgency, from the live engine:
@@ -204,6 +208,7 @@ app.post("/api/assistant", async (req, res, next) => {
       isolated: Boolean(body.isolated),
       alerts: Array.isArray(body.alerts) ? body.alerts : [],
       telemetrySummary: typeof body.telemetrySummary === "string" ? body.telemetrySummary : "",
+      emergencyContext: typeof body.emergencyContext === "string" ? body.emergencyContext : "",
     });
     let protocols = [];
     try {

@@ -34,6 +34,7 @@ import {
   type BuiltSpacesuit,
   type SuitMeshEntry,
 } from "./spacesuitBuilder.ts";
+import { EmergencyEngine, type EmergencyVisualState } from "./emergencyEngine.ts";
 import {
   createHologramShellMaterial,
   createLabBackdropTexture,
@@ -74,6 +75,10 @@ export interface ViewportCallbacks {
   ) => void;
   onTelemetry: (telemetry: TelemetryReadout) => void;
   onLabelsProject: (labels: LabelProjection[]) => void;
+  /** Name of the mesh under a click (lets Emergency mode tell eyes from brain, veins from heart). */
+  onPickMesh?: (meshName: string) => void;
+  /** Screen position of the active emergency's anatomical anchor, or null. */
+  onEmergencyAnchor?: (anchor: { x: number; y: number; visible: boolean } | null) => void;
 }
 
 interface EntryMaterials {
@@ -155,6 +160,9 @@ export class MedicalViewportController {
   private mriScene: THREE.Scene | null = null;
   private mriProxies: { src: THREE.Mesh; back: THREE.Mesh; front: THREE.Mesh; cap: THREE.Mesh }[] = [];
   private disposed = false;
+  private emergency: EmergencyEngine | null = null;
+  private emergencyVisual: EmergencyVisualState | null = null;
+  private lastAnchorReported = false;
   private activeCameraTween: gsap.core.Tween | null = null;
   private activeTargetTween: gsap.core.Tween | null = null;
   private activeRotationTween: gsap.core.Tween | null = null;
@@ -437,6 +445,9 @@ export class MedicalViewportController {
         this.entryMats.set(entry, { holo, thermal, realistic, xray, pulse });
       }
 
+      this.emergency = new EmergencyEngine(built, this.renderer.getPixelRatio());
+      if (this.emergencyVisual) this.emergency.setState(this.emergencyVisual);
+
       this.applyStateVisuals();
 
       if (!this.isSoftwareGl) {
@@ -564,6 +575,17 @@ export class MedicalViewportController {
     }
   }
 
+  /** Spaceflight Emergency Simulation state (null = no scenario). */
+  public setEmergency(visual: EmergencyVisualState | null) {
+    this.emergencyVisual = visual;
+    this.emergency?.setState(
+      visual ?? { scenario: null, level: 0, preview: false, view: "emergency", paused: false },
+    );
+    this.applyStateVisuals();
+    this.startOrSyncLoop();
+    if (this.state.animationMode !== "playing") this.requestRender();
+  }
+
   public updateTelemetrySnapshot(snapshot: SuitTelemetrySnapshot) {
     this.latestSnapshot = snapshot;
     this.suit?.updateHudDisplays(snapshot);
@@ -586,12 +608,34 @@ export class MedicalViewportController {
 
     const offset = meta.focusCameraOffset;
     const scale = closeZoom ? 0.72 : 1.0;
+    // The mode switch and vitals HUD sit over the top of the viewport, so aim slightly
+    // above the organ: it then lands a little below centre, clear of the overlays.
+    const dist = Math.hypot(offset[0], offset[1], offset[2]) * scale;
+    const viewH = 2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const lift = viewH * 0.07;
+    const aim: [number, number, number] = [target[0], target[1] + lift, target[2]];
     const pos: [number, number, number] = [
-      target[0] + offset[0] * scale,
-      target[1] + offset[1] * scale,
-      target[2] + offset[2] * scale,
+      aim[0] + offset[0] * scale,
+      aim[1] + offset[1] * scale,
+      aim[2] + offset[2] * scale,
     ];
-    this.animateCameraTo(pos, target);
+    this.animateCameraTo(pos, aim);
+  }
+
+  /** Frame the active emergency's anatomical anchor (e.g. the jugular vein, not the whole torso). */
+  public focusOnEmergency(closeZoom = false): boolean {
+    if (!this.twin || !this.emergency?.getAnchorLocal(_vec3)) return false;
+    const g = this.twin.twinGroup;
+    // animateCameraTo turns the twin back to rotation 0, so frame the anchor as it will sit then.
+    const unrotated = new THREE.Matrix4().compose(g.position, new THREE.Quaternion(), g.scale);
+    if (g.parent) unrotated.premultiply(g.parent.matrixWorld);
+    const target = _vec3.clone().applyMatrix4(unrotated);
+    const dist = closeZoom ? 0.55 : 0.9;
+    const viewH = 2 * dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const aim: [number, number, number] = [target.x, target.y + viewH * 0.06, target.z];
+    const pos: [number, number, number] = [aim[0] + dist * 0.12, aim[1] + dist * 0.06, aim[2] + dist];
+    this.animateCameraTo(pos, aim);
+    return true;
   }
 
   public focusOnSuitComponent(componentId: SuitComponentId, closeZoom = false) {
@@ -1095,6 +1139,29 @@ export class MedicalViewportController {
           : "#00E5FF";
     this.fxHoloMat.uniforms.uColor.value.set(alertFxHex);
     this.beamMat.uniforms.uColor.value.set(alertFxHex);
+
+    // 5. Spaceflight Emergency Simulation overlay: only affected structures change.
+    if (this.emergency?.active) {
+      this.emergency.applyMaterials(this.twin.organEntries, suitVisibleNow);
+      if (suitVisibleNow && this.suit) {
+        // Keep the suit on screen but see-through, like an X-ray diagnostic overlay.
+        for (const entry of this.suit.entries) {
+          const mats = this.suitEntryMats.get(entry);
+          if (!mats || !entry.mesh.visible) continue;
+          const m = entry.mesh.material as THREE.Material & { uniforms?: Record<string, THREE.IUniform> };
+          if (m.uniforms?.uOpacity) {
+            m.uniforms.uOpacity.value = Math.min(Number(m.uniforms.uOpacity.value), 0.22);
+          } else if ("opacity" in m) {
+            if (!m.transparent) {
+              m.transparent = true;
+              m.depthWrite = false;
+              m.needsUpdate = true;
+            }
+            m.opacity = Math.min(m.opacity, 0.26);
+          }
+        }
+      }
+    }
   }
 
   private bindDomEvents() {
@@ -1107,7 +1174,7 @@ export class MedicalViewportController {
     const pickTargetAt = (
       e: MouseEvent,
     ):
-      | { kind: "organ"; id: AnatomyId }
+      | { kind: "organ"; id: AnatomyId; meshName: string }
       | { kind: "suit"; id: SuitComponentId; openHud: boolean }
       | null => {
       if (!this.twin) return null;
@@ -1121,7 +1188,9 @@ export class MedicalViewportController {
         const anatomyFocusMode =
           this.state.mode === "organ" ||
           this.state.mode === "muscular" ||
-          this.state.mode === "nervous";
+          this.state.mode === "nervous" ||
+          Boolean(this.emergency?.active) ||
+          Boolean(this.emergencyVisual);
 
         if (!anatomyFocusMode) {
           const suitHits = this.raycaster.intersectObjects(this.suit.interactables, false);
@@ -1139,7 +1208,11 @@ export class MedicalViewportController {
       const organHits = this.raycaster.intersectObjects(this.twin.interactables, false);
       const organHit = organHits.find((h) => h.object.visible && h.object.userData.anatomyId);
       if (organHit) {
-        return { kind: "organ", id: organHit.object.userData.anatomyId as AnatomyId };
+        return {
+          kind: "organ",
+          id: organHit.object.userData.anatomyId as AnatomyId,
+          meshName: organHit.object.name,
+        };
       }
 
       if (this.state.suitActive && this.suit) {
@@ -1176,6 +1249,7 @@ export class MedicalViewportController {
       if (hit.kind === "suit") {
         this.callbacks.onSelectSuitComponent(hit.id, true, hit.openHud);
       } else {
+        this.callbacks.onPickMesh?.(hit.meshName);
         this.callbacks.onSelectOrgan(hit.id, true);
       }
     };
@@ -1192,6 +1266,7 @@ export class MedicalViewportController {
         this.callbacks.onSelectSuitComponent(hit.id, true, hit.openHud);
         this.focusOnSuitComponent(hit.id, true);
       } else {
+        this.callbacks.onPickMesh?.(hit.meshName);
         this.callbacks.onSelectOrgan(hit.id, true);
         this.focusOnOrgan(hit.id, true);
       }
@@ -1396,7 +1471,8 @@ export class MedicalViewportController {
 
     if (this.twin) {
       const hasSelection = Boolean(this.state.selectedOrganId || this.state.selectedSuitComponentId);
-      if (playing && !hasSelection && !this.activeCameraTween) {
+      // Auto-rotation pauses while an emergency is on screen so it can be inspected.
+      if (playing && !hasSelection && !this.activeCameraTween && !this.emergency?.active) {
         this.twin.twinGroup.rotation.y += dt * 0.14;
       }
 
@@ -1436,6 +1512,10 @@ export class MedicalViewportController {
         }
         moteAttr.needsUpdate = true;
       }
+
+      if (this.emergency?.active && this.emergency.update(dt, playing)) {
+        this.applyStateVisuals();
+      }
     }
 
     if (this.mriPlane && this.mriBox) {
@@ -1472,7 +1552,26 @@ export class MedicalViewportController {
       });
 
       this.projectLabels();
+      this.projectEmergencyAnchor();
     }
+  }
+
+  private projectEmergencyAnchor() {
+    const cb = this.callbacks.onEmergencyAnchor;
+    if (!cb) return;
+    if (!this.emergency?.active || !this.emergency.getAnchorWorld(_projVec)) {
+      if (this.lastAnchorReported) cb(null);
+      this.lastAnchorReported = false;
+      return;
+    }
+    _projVec.project(this.camera);
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
+    const sx = (_projVec.x * 0.5 + 0.5) * w;
+    const sy = (-_projVec.y * 0.5 + 0.5) * h;
+    const visible = _projVec.z > -1 && _projVec.z < 1 && sx > 8 && sx < w - 8 && sy > 8 && sy < h - 8;
+    cb({ x: Math.round(sx), y: Math.round(sy), visible });
+    this.lastAnchorReported = true;
   }
 
   private projectLabels() {
@@ -1755,6 +1854,8 @@ export class MedicalViewportController {
     this.cancelCameraTweens();
     this.stopLoop();
     this.cleanupEvents();
+    this.emergency?.dispose();
+    this.emergency = null;
     this.twin?.dispose();
     this.suit?.dispose();
     this.skinHoloMat.dispose();

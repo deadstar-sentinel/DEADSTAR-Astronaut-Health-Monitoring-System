@@ -329,8 +329,10 @@ export async function answerMedicalQuery({
   isolated,
   alerts = [],
   telemetrySummary = "",
+  emergencyContext = "",
 }) {
   const cleanQuestion = String(question || "").trim().slice(0, 600);
+  const cleanEmergency = String(emergencyContext || "").trim().slice(0, 2400);
   if (!cleanQuestion) {
     return {
       answer: "Please enter an anatomical, spacesuit engineering, or telemetry question.",
@@ -382,7 +384,11 @@ export async function answerMedicalQuery({
       suitPart ? `Suit Component Purpose: ${suitPart.purpose} | Principle: ${suitPart.principles}` : "",
       telemetrySummary ? `Current Simulated Suit Telemetry: ${telemetrySummary}` : "",
       `Active Simulated Alerts: ${alertSummaryText}`,
+      cleanEmergency ? `Active Spaceflight Emergency Simulation (educational, simulated data):\n${cleanEmergency}` : "",
       "Strict Rules:",
+      cleanEmergency
+        ? "- Answer about the emergency simulation using the scenario facts above. Keep its evidence label: separate documented spaceflight findings from simplified or hypothetical parts, and never claim a condition affects every astronaut."
+        : "",
       "- Provide concise, scientifically accurate medical or aerospace engineering explanations in 2-4 crisp sentences.",
       "- Clearly state that any telemetry, vitals, or 48h forecast values are simulated educational demonstration data, never clinical diagnosis or real patient data.",
       "- If asked about an alert, explain clearly WHY it triggered and WHICH subsystem is affected.",
