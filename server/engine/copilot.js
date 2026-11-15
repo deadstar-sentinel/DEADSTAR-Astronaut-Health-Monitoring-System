@@ -1,4 +1,5 @@
 import { HRP_RISKS } from "./constants.js";
+import { pctText } from "./analysis.js";
 
 const RISK_NAMES = Object.fromEntries(HRP_RISKS.map((r) => [r.id, r.name]));
 
@@ -88,7 +89,7 @@ export function rules_answer(q, st, focus = null) {
     const curTemp = st.crew[cid2].hourly.temp[st.crew[cid2].hourly.temp.length - 1];
     let txt =
       `${nm}: core temperature now ${curTemp.toFixed(2)} °C. ` +
-      `Probability of reaching 38.0 °C in the next 24 hours: ${Math.round(th.peak_prob * 100)}%, highest in about ${th.peak_in_h} hours. `;
+      `Probability of reaching 38.0 °C in the next 24 hours: ${pctText(th.peak_prob)}, highest in about ${th.peak_in_h} hours. `;
     if (lead !== null) {
       txt += `I first saw the combined temperature, heart-rate and HRV pattern ${lead} hours ago.`;
     }

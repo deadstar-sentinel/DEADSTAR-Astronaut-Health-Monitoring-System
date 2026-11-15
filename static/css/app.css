@@ -271,6 +271,7 @@ a:hover { text-decoration: underline; }
 
 /* risk matrix */
 #matrix { overflow-x: auto; padding-right: 48px; }
+.fc-caution { border-left: 2px solid var(--watch); background: rgba(201, 122, 14, .10); color: var(--ink); font-size: 11px; line-height: 1.45; padding: 7px 9px; }
 .matrix { width: auto; border-collapse: collapse; font-size: 11.5px; }
 .matrix td .cell { width: 52px; }
 .matrix th { font: 500 10px/1.2 var(--sans); letter-spacing: .04em; color: var(--ink-3); text-align: left; padding: 6px 6px; vertical-align: bottom; }

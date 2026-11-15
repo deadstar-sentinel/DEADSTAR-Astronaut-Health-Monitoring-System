@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MeshSurfaceSampler } from "three/addons/math/MeshSurfaceSampler.js";
 import { ANATOMY_BY_ID, type AnatomyId } from "../data/anatomyCatalog.ts";
 import { buildProceduralBrain } from "./brainBuilder.ts";
+import { buildProceduralSkull, makeSkinProbe } from "./skullBuilder.ts";
 
 export interface AnatomyMeshEntry {
   mesh: THREE.Mesh;
@@ -1073,9 +1074,18 @@ export async function loadAndBuildAnatomyTwin(
   let gutMesh: THREE.Mesh | null = null;
   let spineMesh: THREE.Mesh | null = null;
   let bodyMesh: THREE.Mesh | null = null;
+  let skullMesh: THREE.Mesh | null = null;
+  const eyeMeshes: THREE.Mesh[] = [];
 
   gltf.scene.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return;
+
+    if (obj.name === "ORG_skull") {
+      skullMesh = obj;
+      obj.visible = false; // Replaced by a procedural skull with orbits, nasal aperture, cheekbones and jaw
+      return;
+    }
+    if (obj.name.startsWith("ORG_eye")) eyeMeshes.push(obj);
 
     if (obj.name.startsWith("FX_")) {
       if (obj.name.startsWith("FX_ring")) fxRings.push(obj);
@@ -1176,6 +1186,44 @@ export async function loadAndBuildAnatomyTwin(
 
   const brainMeshes = buildProceduralBrain(brainBox, twinGroup);
   registerProcedural(brainMeshes, "brain", "organ");
+
+  // Eyes: the GLB eyeballs poke through the face. Push each one back until its front sits
+  // just behind the skin. The skin may have eye openings, so also probe the ring around the eye.
+  const skinFrontZ = makeSkinProbe(bodySkinMeshes, twinGroup);
+  for (const eye of eyeMeshes) {
+    const box = new THREE.Box3().setFromObject(eye).applyMatrix4(invTwin);
+    const c = box.getCenter(new THREE.Vector3());
+    const r = (box.max.y - box.min.y) / 2;
+    const ahead = (z: number | null): z is number => z !== null && z > box.min.z;
+    const around = [
+      skinFrontZ(c.x, c.y + r * 1.5),
+      skinFrontZ(c.x, c.y - r * 1.5),
+      skinFrontZ(c.x + r * 1.5, c.y),
+      skinFrontZ(c.x - r * 1.5, c.y),
+    ].filter(ahead);
+    const centre = skinFrontZ(c.x, c.y);
+    const candidates = [...(ahead(centre) ? [centre] : []), ...(around.length ? [around.reduce((a, b) => a + b, 0) / around.length] : [])];
+    if (candidates.length === 0) continue;
+    const limit = Math.min(...candidates) - 0.0025;
+    if (box.max.z > limit) {
+      eye.position.z -= box.max.z - limit;
+      eye.updateMatrixWorld(true);
+    }
+  }
+
+  // Skull: procedural landmarks fitted to the original shell and the re-seated eyes.
+  const skullBox = new THREE.Box3();
+  if (skullMesh) skullBox.setFromObject(skullMesh).applyMatrix4(invTwin);
+  else skullBox.set(new THREE.Vector3(-0.068, 1.559, -0.083), new THREE.Vector3(0.068, 1.765, 0.082));
+  const skullMeshes = buildProceduralSkull(
+    {
+      skullBox,
+      eyeBoxes: eyeMeshes.map((e) => new THREE.Box3().setFromObject(e).applyMatrix4(invTwin)),
+      skinFrontZ,
+    },
+    twinGroup,
+  );
+  registerProcedural(skullMeshes, "skeletal", "bone");
 
   const pancreasMeshes = buildProceduralPancreas(stomachBox, twinGroup);
   registerProcedural(pancreasMeshes, "pancreas", "organ");

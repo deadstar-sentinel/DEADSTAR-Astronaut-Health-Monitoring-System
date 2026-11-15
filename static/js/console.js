@@ -6,10 +6,33 @@ import { connectSerial } from "./serial.js";
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const api = async (p, o) => { const r = await fetch(p, o); if (!r.ok) throw new Error((await r.text()) || r.status); return r.json(); };
-const post = (p, b) => api(p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+
+/* Mission + scenario belong to this browser, shared with Mission Control (same storage key),
+   so one visitor switching missions never changes what other judges see. */
+const VIEW_KEY = "sentinel-view";
+const readView = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}");
+    return { mission: typeof v.mission === "string" ? v.mission : "mars_transit", scenario: typeof v.scenario === "string" ? v.scenario : "baseline" };
+  } catch { return { mission: "mars_transit", scenario: "baseline" }; }
+};
+const VIEW = readView();
+const saveView = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify(VIEW)); } catch { /* private mode: per-tab only */ } };
+const UNSCOPED = /^\/api\/(control|meta|log|pvt|ingest|template)/;
+const scoped = p => {
+  if (!p.startsWith("/api/") || UNSCOPED.test(p)) return p;
+  const u = new URL(p, location.origin);
+  if (!u.searchParams.has("mission")) u.searchParams.set("mission", VIEW.mission);
+  if (!u.searchParams.has("scenario")) u.searchParams.set("scenario", VIEW.scenario);
+  return u.pathname + u.search;
+};
+const api = async (p, o) => { const r = await fetch(scoped(p), o); if (!r.ok) throw new Error((await r.text()) || r.status); return r.json(); };
+const post = (p, b) => api(p, { method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify(!UNSCOPED.test(p) && b && typeof b === "object" ? { mission: VIEW.mission, scenario: VIEW.scenario, ...b } : b) });
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const toast = msg => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3200); };
+/** Model probabilities are never exactly 0 or 100 %. Returns the number part; callers add "%". */
+const pctNum = p => (p >= 0.995 ? ">99" : p > 0 && p < 0.005 ? "<1" : String(Math.round(p * 100)));
 const bandLabel = { nominal: "Nominal", watch: "Watch", act: "Act" };
 const bandGlyph = { nominal: "○", watch: "◐", act: "●" };
 
@@ -40,13 +63,15 @@ async function boot() {
   setInterval(() => renderSitrep(true), 9000);
   waveLoop();
   document.addEventListener("keydown", onKey);
+  // Mission Control (or another console tab) changed the mission or scenario: follow it.
+  window.addEventListener("storage", e => { if (e.key === VIEW_KEY) { Object.assign(VIEW, readView()); refresh(true); } });
   window.addEventListener("resize", debounce(() => { renderForecast(); if (S.pane === "whatif") renderWhatIf(); }, 200));
 }
 
 function buildStatic() {
   const ms = $("#missionSeg");
   ms.innerHTML = S.meta.missions.map(m => `<button data-m="${m.id}" title="${esc(m.description)}">${esc(m.short)}</button>`).join("");
-  ms.onclick = async e => { const b = e.target.closest("button"); if (!b) return; await post("/api/control", { mission: b.dataset.m }); toast(`Mission profile: ${b.textContent}`); refresh(true); };
+  ms.onclick = e => { const b = e.target.closest("button"); if (!b) return; VIEW.mission = b.dataset.m; saveView(); toast(`Mission profile: ${b.textContent}`); refresh(true); };
   const ss = $("#scenarioSeg");
   ss.innerHTML = Object.entries(S.meta.scenarios).map(([k, v]) => `<button data-s="${k}" title="${esc(v.desc)}"><span class="kbd">${v.key}</span>${esc(v.label.split(" ")[0])}</button>`).join("");
   ss.onclick = e => { const b = e.target.closest("button"); if (b) setScenario(b.dataset.s); };
@@ -96,7 +121,8 @@ function onKey(e) {
 }
 
 async function setScenario(k) {
-  await post("/api/control", { scenario: k });
+  VIEW.scenario = k;
+  saveView();
   toast(`Scenario: ${S.meta.scenarios[k].label}`);
   await refresh(true);
   if (k !== "baseline") { const b = await api("/api/briefing"); $("#brief").textContent = b.text; }
@@ -271,14 +297,17 @@ async function renderForecast() {
   if (f.threshold) {
     const p = f.threshold.peak_prob ?? f.threshold.prob_at_horizon;
     const lbl = f.resolution === "hour" ? `peak hourly probability, in ${f.threshold.peak_in_h} h` : `by ${hz === "end" ? "mission end" : "+" + f.horizon + " days"}`;
-    side.push(`<div><div class="lbl">P(${esc(f.threshold.label)})</div><div class="big-prob" style="color:${p >= .5 ? "#f19ae0" : p >= .2 ? "#f0b660" : "var(--ink)"}">${Math.round(p * 100)}<small>%</small></div><div class="dim" style="font-size:11px;margin-top:4px">${lbl}</div></div>`);
+    side.push(`<div><div class="lbl">P(${esc(f.threshold.label)})</div><div class="big-prob" style="color:${p >= .5 ? "#f19ae0" : p >= .2 ? "#f0b660" : "var(--ink)"}">${pctNum(p)}<small>%</small></div><div class="dim" style="font-size:11px;margin-top:4px">${lbl}</div></div>`);
   } else {
     side.push(`<div><div class="lbl">Forecast at horizon</div><div class="big-prob">${fmt(last, dec)}<small> ${esc(f.meta.unit)}</small></div><div class="dim" style="font-size:11px;margin-top:4px">80% band ${fmt(f.lo80.at(-1), dec)} – ${fmt(f.hi80.at(-1), dec)}</div></div>`);
   }
   const rows = [];
+  let caution = "";
   if (f.resolution === "hour") {
     const bt = f.backtest; const hrow = bt.horizons.find(x => x.h >= Math.min(f.horizon, 24)) || bt.horizons.at(-1);
     const hrow2 = bt.horizons.filter(x => x.h <= f.horizon).at(-1) || hrow;
+    if (hrow2.skill < 0) caution = `At ${hrow2.h} h this model scores worse than simply assuming nothing changes (skill ${Math.round(hrow2.skill * 100)}%). Read the band, not the line.`;
+    else if (bt.coverage80 != null && bt.coverage80 < 0.7) caution = `The 80% band held only ${Math.round(bt.coverage80 * 100)}% of past outcomes for this signal: it is too narrow.`;
     rows.push(["Evidence", `<span class="evid ${f.calibrated ? "ok" : "prior"}">${f.calibrated ? "Backtested" : "Uncalibrated"}</span>`]);
     rows.push([`MAE at ${hrow2.h} h`, `${fmt(hrow2.mae, dec + 1)} ${esc(f.meta.unit)}`]);
     rows.push([`Skill vs naive (${hrow2.h} h)`, `${hrow2.skill >= 0 ? "+" : ""}${Math.round(hrow2.skill * 100)}%`]);
@@ -291,12 +320,15 @@ async function renderForecast() {
     const k = Object.keys(f.backtest).filter(k => f.backtest[k]).map(Number).filter(x => x <= f.horizon).pop() || Object.keys(f.backtest).filter(k => f.backtest[k]).map(Number)[0];
     const b = k ? f.backtest[k] : null;
     if (b) { rows.push([`MAE at ${k} d`, `${fmt(b.mae, dec + 1)} ${esc(f.meta.unit)}`]); rows.push([`Skill vs naive (${k} d)`, `${b.skill >= 0 ? "+" : ""}${Math.round(b.skill * 100)}%`]); rows.push(["80% coverage", `${Math.round(b.coverage80 * 100)}%`]); }
+    if (ev !== "backtested") caution = "This horizon is beyond what could be back-tested. The forecast follows the NASA population rate more than this astronaut's own data.";
+    else if (b && b.skill < 0) caution = `At ${k} days this model scores worse than simply assuming nothing changes (skill ${Math.round(b.skill * 100)}%). Read the band, not the line.`;
     const perMonth = f.slope_per_day * 30, prior = f.prior_slope * 30;
     rows.push(["Personal trend", `${perMonth >= 0 ? "+" : ""}${fmt(perMonth, dec > 1 ? 3 : 2)}/mo`]);
     rows.push(["NASA prior", `${prior >= 0 ? "+" : ""}${fmt(prior, dec > 1 ? 3 : 2)}/mo`]);
     rows.push(["Days to mission end", `${f.mission_days_left}`]);
   }
   side.push(`<div>${rows.map(([k, v]) => `<div class="stat-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("")}</div>`);
+  if (caution) side.push(`<div class="fc-caution" role="note">${esc(caution)}</div>`);
   side.push(`<div class="dim" style="font-size:10.5px;line-height:1.45">${f.resolution === "hour" ? "Seasonal-profile model on the last 14 days with split-conformal intervals from rolling backtests." : "Bayesian trend: NASA population rate as prior, this astronaut's measurements as likelihood."}</div>`);
   $("#fcSide").innerHTML = side.join("");
 }
@@ -469,7 +501,7 @@ function drawWI(r) {
   const e = r.end;
   const card = (k, label, dec, pct) => {
     const x = e[k]; const good = x.better === "higher" ? x.delta > 0.0001 : x.delta < -0.0001; const bad = x.better === "higher" ? x.delta < -0.0001 : x.delta > 0.0001;
-    const f = v => pct ? `${Math.round(v * 100)}%` : fmt(v, dec);
+    const f = v => pct ? `${pctNum(v)}%` : fmt(v, dec);
     return `<div class="wi-card"><div class="lbl">${label}</div><div class="v">${f(x.scenario)}<small style="font-size:11px;color:var(--ink-3)"> ${pct ? "" : esc(x.unit)}</small></div><div class="b">plan as flown ${f(x.baseline)}</div><div class="d ${good ? "good" : bad ? "bad" : "flat"}">${x.delta === 0 ? "no change" : (x.delta > 0 ? "▲ " : "▼ ") + (pct ? Math.abs(Math.round(x.delta * 100)) + " pts" : fmt(Math.abs(x.delta), dec))}</div></div>`;
   };
   $("#wiResults").innerHTML = card("bmd", "Hip BMD at mission end", 1) + card("p_bone_10", "P(≥10 % bone loss)", 0, true) + card("muscle", "Leg strength at end", 1) + card("vo2", "VO₂max at end", 1) +
@@ -668,7 +700,7 @@ function renderSitrep(rotate) {
   if (rotate) sitIdx = (sitIdx + 1) % list.length;
   const a = list[sitIdx % list.length];
   let nums = "";
-  if (a.fever_prob_24h != null) nums = `<span class="sep">·</span> P(fever ≥ 38 °C, 24 h) <span class="num">${Math.round(a.fever_prob_24h * 100)}%</span>${a.fever_in_h ? ` <span class="sep">·</span> crossing in <span class="num">${a.fever_in_h} h</span>` : ""}${a.detected_hours_ago != null ? ` <span class="sep">·</span> flagged <span class="num">${a.detected_hours_ago} h</span> ago` : ""}`;
+  if (a.fever_prob_24h != null) nums = `<span class="sep">·</span> P(fever ≥ 38 °C, 24 h) <span class="num">${pctNum(a.fever_prob_24h)}%</span>${a.fever_in_h ? ` <span class="sep">·</span> crossing in <span class="num">${a.fever_in_h} h</span>` : ""}${a.detected_hours_ago != null ? ` <span class="sep">·</span> flagged <span class="num">${a.detected_hours_ago} h</span> ago` : ""}`;
   else nums = `<span class="sep">·</span> <span class="muted">${esc(a.detail.split(". ")[0])}</span>`;
   const dec = a.autonomous ? `EARTH REPLY ${Math.round(a.earth_reply_min)} MIN &gt; ${Math.round(a.act_within_min)} MIN DEADLINE → SENTINEL ACTING ONBOARD` : `TIME ALLOWS A GROUND DECISION · ${fmtMin(a.earth_reply_min)}`;
   el.className = `sitrep ${a.severity}`;

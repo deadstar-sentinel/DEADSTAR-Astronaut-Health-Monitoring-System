@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { AnatomyId } from "../data/anatomyCatalog.ts";
 
 /* ----------------------------------------------------------------- engine types (server/engine) */
@@ -114,6 +114,14 @@ export function anatomyForRisk(riskId: string, risks: HrpRisk[]): AnatomyId | nu
   return hit ?? (organ === "lymph" ? "circulatory" : null);
 }
 
+/** Probabilities from a model are never exactly 0 or 1: show the extremes as "<1%" / ">99%". */
+export function fmtProb(p: number | null | undefined): string {
+  if (typeof p !== "number" || !Number.isFinite(p)) return "—";
+  if (p >= 0.995) return ">99%";
+  if (p > 0 && p < 0.005) return "<1%";
+  return `${Math.round(p * 100)}%`;
+}
+
 /* ----------------------------------------------------------------- fetch helpers */
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
@@ -147,14 +155,54 @@ interface SentinelCtx {
   earthReplyMin: number | null;   // round trip + ground response, from the engine
   missionId: string;              // this client's mission (never the server-wide default)
   setMissionId: (id: string) => void;
+  scenarioId: string;             // this client's scenario, shared with /console in this browser
   focusRisk: string | null;       // set by an alert's "Show me": the card opens on exactly that risk
   setFocusRisk: (id: string | null) => void;
 }
 const Ctx = createContext<SentinelCtx | null>(null);
 
+/* Mission + scenario are per browser and shared with the /console page (same key), so both
+   pages always show the same crew state and no visitor changes what other judges see. */
+export const VIEW_KEY = "sentinel-view";
+interface SharedView {
+  mission: string;
+  scenario: string;
+}
+export function readSharedView(): SharedView {
+  try {
+    const v = JSON.parse(localStorage.getItem(VIEW_KEY) || "{}") as Partial<SharedView>;
+    return {
+      mission: typeof v.mission === "string" ? v.mission : "mars_transit",
+      scenario: typeof v.scenario === "string" ? v.scenario : "baseline",
+    };
+  } catch {
+    return { mission: "mars_transit", scenario: "baseline" };
+  }
+}
+
 export function SentinelProvider({ children }: { children: ReactNode }) {
-  const [missionId, setMissionId] = useState("mars_transit");
-  const mission = useFetch<MissionState>(`/api/state?mission=${missionId}`, 20000, true);
+  const [view, setView] = useState<SharedView>(readSharedView);
+  const missionId = view.mission;
+  const scenarioId = view.scenario;
+  const setMissionId = useCallback((id: string) => {
+    setView((v) => {
+      const next = { ...v, mission: id };
+      try {
+        localStorage.setItem(VIEW_KEY, JSON.stringify(next));
+      } catch {
+        /* private mode: this tab only */
+      }
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === VIEW_KEY) setView(readSharedView());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  const mission = useFetch<MissionState>(`/api/state?mission=${missionId}&scenario=${scenarioId}`, 20000, true);
   const meta = useFetch<Meta>("/api/meta");
   const [crewId, setCrewId] = useState("mori");
   const [focusRisk, setFocusRisk] = useState<string | null>(null);
@@ -166,7 +214,7 @@ export function SentinelProvider({ children }: { children: ReactNode }) {
     if (crewIds && !crewIds.split(",").includes(crewId)) setCrewId(crewIds.split(",")[0]);
   }, [crewIds, crewId]);
   return (
-    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin, missionId, setMissionId, focusRisk, setFocusRisk }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ mission, meta, crewId, setCrewId, earthReplyMin, missionId, setMissionId, scenarioId, focusRisk, setFocusRisk }}>{children}</Ctx.Provider>
   );
 }
 

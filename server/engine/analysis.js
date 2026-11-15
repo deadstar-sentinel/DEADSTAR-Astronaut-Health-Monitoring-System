@@ -25,6 +25,14 @@ const round = (v, dec) => {
 };
 const roundArr = (arr, dec) => Array.from(arr, (v) => round(v, dec));
 
+/** A model probability is never exactly 0 % or 100 %: show the extremes as "<1%" / ">99%". */
+export function pctText(p) {
+  if (p === null || p === undefined || !Number.isFinite(p)) return "—";
+  if (p >= 0.995) return ">99%";
+  if (p > 0 && p < 0.005) return "<1%";
+  return `${Math.round(p * 100)}%`;
+}
+
 export function daily_prior(sig, mission) {
   const g = mission.gravity_g;
   const gp = 1 - 0.6 * g;
@@ -565,7 +573,7 @@ export function risk_scores(an, crewMoodSd, svb) {
     5 + 90 * pSans,
     [
       `ONSD ${d.onsd[d.onsd.length - 1].toFixed(2)} mm now, ${oMu.toFixed(2)} ± ${oSd.toFixed(2)} mm at mission end`,
-      `P(ONSD ≥ 6.0 mm by mission end) ${Math.round(pSans * 100)}%`,
+      `P(ONSD ≥ 6.0 mm by mission end) ${pctText(pSans)}`,
     ],
     "Optic ultrasound and OCT; B-Complex and thigh-cuff protocols (investigational)"
   );
@@ -578,7 +586,7 @@ export function risk_scores(an, crewMoodSd, svb) {
     4 + 4.0 * Math.max(0, lossEnd) + 40 * pBone,
     [
       `Hip BMD ${d.bmd[d.bmd.length - 1].toFixed(1)} % now, ${bMu.toFixed(1)} ± ${bSd.toFixed(1)} % at mission end`,
-      `P(≥10 % loss by mission end) ${Math.round(pBone * 100)}%`,
+      `P(≥10 % loss by mission end) ${pctText(pBone)}`,
     ],
     "Resistive exercise loading; bisphosphonate if the flight surgeon agrees"
   );
@@ -718,7 +726,7 @@ export class CrewState {
           title: `${last}: infection-like pattern`,
           detail:
             `Core temperature, heart rate and HRV have drifted together for ${lead} h. ` +
-            `P(fever ≥ 38.0 °C within 24 h) = ${Math.round(p * 100)}%` +
+            `P(fever ≥ 38.0 °C within 24 h) = ${pctText(p)}` +
             (cross ? `; mean forecast crosses 38.0 °C in ${cross} h.` : "."),
           detected_hours_ago: lead,
           lead_hours: leadTotal,

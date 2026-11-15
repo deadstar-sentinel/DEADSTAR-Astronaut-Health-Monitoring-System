@@ -1,6 +1,6 @@
 import type { AnatomyId } from "../data/anatomyCatalog.ts";
 import { Num } from "./Num.tsx";
-import { ORGAN_LINK, RISK_SIGNAL, anatomyForRisk, bandStyle, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
+import { ORGAN_LINK, RISK_SIGNAL, anatomyForRisk, bandStyle, fmtProb, useFetch, useSentinel, type CrewDetail, type Forecast } from "./api.tsx";
 
 /** History (solid), forecast mean (dashed), 80/95 % bands, NOW rule and threshold — straight from /api/forecast. */
 const clean = (a: (number | null)[] | undefined): number[] => {
@@ -51,14 +51,16 @@ function ForecastChart({ f: raw, decimals }: { f: Forecast; decimals: number }) 
 }
 
 export function ForecastCard({ organId }: { organId: AnatomyId }) {
-  const { crewId, mission, meta, earthReplyMin, focusRisk, missionId } = useSentinel();
+  const { crewId, mission, meta, earthReplyMin, focusRisk, missionId, scenarioId } = useSentinel();
   const base = ORGAN_LINK[organId];
   // An alert's "Show me" pins its exact risk (e.g. immune -> fever forecast) when it belongs to this structure.
   const pinned = focusRisk && meta && anatomyForRisk(focusRisk, meta.risks) === organId ? focusRisk : null;
   const organKey = pinned ? meta?.risks.find((r) => r.id === pinned)?.organ ?? base.organ : base.organ;
   const link = pinned && RISK_SIGNAL[pinned] ? { organ: organKey, ...RISK_SIGNAL[pinned] } : base;
-  const detail = useFetch<CrewDetail>(`/api/crew/${crewId}?mission=${missionId}`);
-  const fc = useFetch<Forecast>(`/api/forecast/${crewId}/${link.signal}?horizon=${link.horizon}&mission=${missionId}`);
+  const detail = useFetch<CrewDetail>(`/api/crew/${crewId}?mission=${missionId}&scenario=${scenarioId}`);
+  const fc = useFetch<Forecast>(
+    `/api/forecast/${crewId}/${link.signal}?horizon=${link.horizon}&mission=${missionId}&scenario=${scenarioId}`,
+  );
   const crew = mission?.crew.find((c) => c.id === crewId);
   const organEntry = organKey ? detail?.organs[organKey] : undefined;
   const riskId = pinned ?? meta?.risks.find((r) => r.organ === organKey && r.name === organEntry?.risk)?.id;
@@ -114,7 +116,7 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
           <div className="sx-reveal"><ForecastChart f={fc} decimals={sig?.decimals ?? 1} /></div>
           {fc.threshold?.peak_prob != null && (
             <div className="px-1 text-[11px] text-slate-200">
-              P({fc.threshold.label}) peaks at <b className="text-white">{Math.round(fc.threshold.peak_prob * 100)}%</b>
+              P({fc.threshold.label}) peaks at <b className="text-white">{fmtProb(fc.threshold.peak_prob)}</b>
               {fc.threshold.mean_crosses_in_h != null && <> · mean crosses in <b className="text-white">{fc.threshold.mean_crosses_in_h} h</b></>}
             </div>
           )}

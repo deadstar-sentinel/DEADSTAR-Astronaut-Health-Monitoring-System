@@ -348,7 +348,9 @@ export function ParticleStage({ rig, onReady }: { rig: StageRig; onReady: () => 
     // ---- glow
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.55, 0.7, 0.12);
+    // Threshold high enough that only the brightest cores glow: dense chest particles add up
+    // additively, and a low threshold turned the whole torso into a white haze.
+    const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.55, 0.34);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
 
