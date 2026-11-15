@@ -422,6 +422,7 @@ export default function App() {
             { kind: "ok", text: `Simulating ${s.name}${a.severity !== null ? ` at L${a.severity}` : ""}.` },
             { kind: "info", text: s.mechanism },
             { kind: "info", text: `Evidence: ${s.evidence === "documented" ? "documented spaceflight risk" : s.evidence === "associated" ? "spaceflight-associated change" : s.evidence === "general" ? "general medical emergency" : "hypothetical teaching case"}.` },
+            say(VOICE.simulate(s.name)),
           ];
         }
         case "severity":
@@ -459,6 +460,7 @@ export default function App() {
           return [
             { kind: "err", text: `Not understood: "${a.text}". Type HELP for commands.` },
             ...(a.suggestion ? [{ kind: "info" as const, text: `Did you mean: SIMULATE ${a.suggestion.toUpperCase()}` }] : []),
+            say(VOICE.unknown),
           ];
       }
     },
