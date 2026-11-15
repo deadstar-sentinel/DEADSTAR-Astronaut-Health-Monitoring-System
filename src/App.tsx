@@ -4,6 +4,8 @@ import { CommandConsole, type ConsoleLine } from "./components/CommandConsole.ts
 import { DemoOverlay, type DemoState } from "./components/DemoOverlay.tsx";
 import { HELP_LINES, parseCommand } from "./utils/commandParser.ts";
 import { setSoundEnabled, sfx, soundEnabled } from "./utils/sound.ts";
+import { getPersona, prefetch, setPersona, speak, stopSpeaking, unlockAudio, type VoicePersona } from "./utils/narrator.ts";
+import { TOUR, readMs, type Audience, type TourAction } from "./data/tourScript.ts";
 import { ANATOMY_BY_ID, VISUALIZATION_MODES } from "./data/anatomyCatalog.ts";
 import { SEVERITY_META, severityHex } from "./data/emergencyScenarios.ts";
 import type {
@@ -276,6 +278,8 @@ export default function App() {
   const handleActivateScenario = useCallback((id: string) => {
     if (!EMERGENCY_BY_ID[id]) return;
     setEmergency((prev) => activateScenario(prev, id, Date.now(), suitScenarioRef.current));
+    // Phones and tablets: the scenario card is a drawer over the body, so get it out of the way.
+    if (window.innerWidth < 1024) setRightOpen(false);
   }, []);
 
   // Frame the affected region once the 3D engine has the scenario (child effects run first).
@@ -487,98 +491,119 @@ export default function App() {
         ? "#00E599"
         : "#00E5FF";
 
-  // Guided tour: ~55 s, every step a real app action. Any click or key takes control.
+  // Narrated cinematic walkthrough. Each shot runs a real app action, flies the camera,
+  // and waits for its narration (or a reading-time hold). Any touch, click or key takes control.
+  const [audience, setAudience] = useState<Audience>(() => {
+    try {
+      return localStorage.getItem("lifeline-audience") === "expert" ? "expert" : "simple";
+    } catch {
+      return "simple";
+    }
+  });
+  const audienceRef = useRef(audience);
+  audienceRef.current = audience;
+  const [narrate, setNarrate] = useState(true);
+  const [persona, setPersonaState] = useState<VoicePersona>(getPersona);
+  const narrateRef = useRef(narrate);
+  narrateRef.current = narrate;
+  const demoRun = useRef(0);
+
+  const setAudiencePersist = useCallback((a: Audience) => {
+    setAudience(a);
+    try {
+      localStorage.setItem("lifeline-audience", a);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
   const stopDemo = useCallback(() => {
+    demoRun.current += 1;
     for (const t of demoTimers.current) window.clearTimeout(t);
     demoTimers.current = [];
+    stopSpeaking();
+    viewportRef.current?.endCinematic();
     setDemo(null);
   }, []);
 
-  const startDemo = useCallback(() => {
-    stopDemo();
-    const steps: { at: number; title: string; caption?: string; run: () => void }[] = [
-      {
-        at: 0,
-        title: "Mission",
-        caption: "DEADSTAR LIFELINE is an onboard flight surgeon for crews minutes of light-time from Earth: when Earth's answer would arrive too late, it acts on board.",
-        run: () => {
+  const runTourAction = useCallback(
+    (a: TourAction) => {
+      const narrow = window.innerWidth < 1024;
+      switch (a) {
+        case "reset":
           setConsoleOpen(false);
+          setLeftOpen(false);
+          setRightOpen(false);
           setEmergency((prev) => setEmergencyModeOpen(prev, false));
           setState((prev) => restoreCompleteBody(selectOrgan(setVisualizationMode(toggleSuitMode(prev, false), "holographic"), null)));
-          viewportRef.current?.focusCameraPreset("reset");
-        },
-      },
-      {
-        at: 6500,
-        title: "Digital twin",
-        caption: "Each organ is tied to NASA's 17 Human Research Program risks and forecast hour by hour, with honest uncertainty bands.",
-        run: () => handleSelectOrgan("brain", true),
-      },
-      {
-        at: 13000,
-        title: "Emergency",
-        caption: "Emergency simulation: the CO₂ scrubber starts to fail. Only the affected structures change colour.",
-        run: () => {
-          setState((prev) => selectOrgan(prev, null));
+          break;
+        case "chest":
+          break;
+        case "xray_head":
+          setState((prev) => setVisualizationMode(prev, "xray"));
+          break;
+        case "co2_l1":
+          setState((prev) => setVisualizationMode(prev, "holographic"));
           simulate("co2_scrubber_failure", 1);
-        },
-      },
-      { at: 17000, title: "Emergency", run: () => setEmergency((prev) => setEmergencyStage(prev, 2)) },
-      {
-        at: 20000,
-        title: "Escalation",
-        caption: "CO₂ builds up in the lungs instead of being cleared. At critical level the whole HUD warns, but the data stays readable.",
-        run: () => setEmergency((prev) => setEmergencyStage(prev, 4)),
-      },
-      {
-        at: 26000,
-        title: "In the suit",
-        caption: "Inside the spacesuit the suit turns see-through, and the same failure drives the suit's AI telemetry warnings.",
-        run: () => handleToggleSuitMode(true),
-      },
-      {
-        at: 33000,
-        title: "Countermeasure",
-        caption: "Countermeasure: switch to backup CO₂ removal. The anatomy recovers to normal without reloading anything.",
-        run: () => setEmergency((prev) => stopEmergency(prev)),
-      },
-      {
-        at: 38500,
-        title: "Documented risk",
-        caption: "Observed on the ISS: stagnant flow and a clot in the jugular vein. Blood backs up behind the obstruction.",
-        run: () => {
+          if (narrow) setRightOpen(false);
+          break;
+        case "co2_l4":
+          setEmergency((prev) => setEmergencyStage(prev, 4));
+          break;
+        case "suit_on":
+          handleToggleSuitMode(true);
+          break;
+        case "countermeasure":
+          setEmergency((prev) => stopEmergency(prev));
+          break;
+        case "clot":
           handleToggleSuitMode(false);
-          simulate("venous_thrombosis", 2);
-        },
-      },
-      { at: 42500, title: "Documented risk", run: () => setEmergency((prev) => setEmergencyStage(prev, 3)) },
-      {
-        at: 48000,
-        title: "Your turn",
-        caption: "Every value is labelled simulated, measured or predicted. Your turn: click any organ, or open the console and type HELP.",
-        run: () => {
+          simulate("venous_thrombosis", 3);
+          if (narrow) setRightOpen(false);
+          break;
+        case "finish":
           setEmergency((prev) => setEmergencyModeOpen(prev, false));
           setState((prev) => selectOrgan(prev, null));
-          viewportRef.current?.focusCameraPreset("reset");
-        },
-      },
-      { at: 55000, title: "End", run: () => setDemo(null) },
-    ];
-    const captioned = steps.filter((s) => s.caption);
-    let shown = 0;
-    steps.forEach((s, i) => {
-      const id = window.setTimeout(() => {
-        s.run();
-        if (s.caption) {
-          shown += 1;
-          const nextCaptioned = steps.slice(i + 1).find((x) => x.caption || x.title === "End");
-          setDemo({ step: shown, total: captioned.length, title: s.title, caption: s.caption, ms: (nextCaptioned?.at ?? s.at + 6000) - s.at });
-        }
-      }, s.at);
-      demoTimers.current.push(id);
-    });
-  }, [stopDemo, handleSelectOrgan, handleToggleSuitMode, simulate]);
+          break;
+      }
+    },
+    [simulate, handleToggleSuitMode],
+  );
 
+  const startDemo = useCallback(() => {
+    stopDemo();
+    unlockAudio();
+    const run = demoRun.current;
+    const alive = () => run === demoRun.current;
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        demoTimers.current.push(window.setTimeout(resolve, ms));
+      });
+    void (async () => {
+      for (let i = 0; i < TOUR.length; i++) {
+        if (!alive()) return;
+        const s = TOUR[i];
+        const text = audienceRef.current === "expert" ? s.expert : s.simple;
+        runTourAction(s.action);
+        const hold = Math.max(s.minMs, readMs(text));
+        setDemo({ step: i + 1, total: TOUR.length, title: s.title, caption: text, ms: hold, audience: audienceRef.current, voice: narrateRef.current });
+        await wait(s.shotDelay ?? 120);
+        if (!alive()) return;
+        viewportRef.current?.cinematic(s.shot);
+        const nextShot = TOUR[i + 1];
+        if (nextShot && narrateRef.current) prefetch(audienceRef.current === "expert" ? nextShot.expert : nextShot.simple);
+        const t0 = Date.now();
+        if (narrateRef.current) await speak(text);
+        else await wait(hold);
+        if (!alive()) return;
+        const rest = s.minMs - (Date.now() - t0);
+        if (rest > 0) await wait(rest);
+      }
+      if (!alive()) return;
+      viewportRef.current?.endCinematic();
+      setDemo(null);
+    })();
+  }, [stopDemo, runTourAction]);
   const startDemoRef = useRef(startDemo);
   startDemoRef.current = startDemo;
 
@@ -690,7 +715,7 @@ export default function App() {
 
           <div className="flex items-baseline gap-2.5 min-w-0">
             <h1 className="text-sm font-semibold tracking-[0.16em] uppercase text-white truncate">
-              DEADSTAR LIFELINE
+              <span className="max-sm:hidden">DEADSTAR </span>LIFELINE
             </h1>
             <span
               className={`hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] truncate ${
@@ -723,6 +748,21 @@ export default function App() {
             <Play className="w-3 h-3" />
             {demo ? "Stop tour" : "Demo tour"}
           </button>
+          <div className="flex items-center border border-cyan-500/30" role="group" aria-label="Explanation level">
+            {(["simple", "expert"] as Audience[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                data-testid={`audience-${a}`}
+                onClick={() => setAudiencePersist(a)}
+                aria-pressed={audience === a}
+                title={a === "simple" ? "Plain-language explanations for everyone" : "Full clinical detail for experts"}
+                className={`px-2 py-1 text-[10px] font-mono uppercase ${audience === a ? "bg-cyan-500/25 text-white" : "text-slate-400 hover:text-white"}`}
+              >
+                {a === "simple" ? "Simple" : "Expert"}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             data-testid="console-btn"
@@ -919,7 +959,24 @@ export default function App() {
         onAskAiAlert={handleAskAiAlert}
       />
 
-      {demo && <DemoOverlay demo={demo} onStop={stopDemo} />}
+      {demo && (
+        <DemoOverlay
+          demo={demo}
+          onStop={stopDemo}
+          onToggleVoice={() => {
+            const next = !narrateRef.current;
+            narrateRef.current = next;
+            setNarrate(next);
+            if (!next) stopSpeaking();
+            setDemo((d) => (d ? { ...d, voice: next } : d));
+          }}
+          persona={persona}
+          onPersona={(p) => {
+            setPersona(p);
+            setPersonaState(p);
+          }}
+        />
+      )}
     </div>
     </SentinelProvider>
   );

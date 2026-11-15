@@ -155,7 +155,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
           <span className="text-[12px] font-mono text-white whitespace-nowrap">{mission.met.label} · day {mission.mission.current_day}/{mission.mission.duration_days}</span>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0" role="tablist" aria-label="Crew member">
+        <div className="flex items-center gap-1.5 shrink-0 max-sm:w-full max-sm:overflow-x-auto max-sm:[scrollbar-width:none]" role="tablist" aria-label="Crew member">
           {mission.crew.map((c) => {
             const s = bandStyle(c.status);
             const on = c.id === crew?.id;
@@ -167,7 +167,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
                 aria-selected={on}
                 onClick={() => setCrewId(c.id)}
                 title={`${c.name}, ${c.role}: health index ${Math.round(c.health_index)}`}
-                className={`flex items-center gap-1.5 px-2 py-1 border text-[11px] font-mono uppercase ${on ? "border-cyan-300 bg-cyan-400/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.25)]" : "border-cyan-500/20 text-slate-300 hover:border-cyan-300 hover:text-white"}`}
+                className={`flex items-center gap-1.5 px-2 py-1 max-sm:py-2 max-sm:px-2.5 border text-[11px] font-mono uppercase ${on ? "border-cyan-300 bg-cyan-400/15 text-white shadow-[0_0_14px_rgba(34,211,238,0.25)]" : "border-cyan-500/20 text-slate-300 hover:border-cyan-300 hover:text-white"}`}
               >
                 <span className={`w-2 h-2 rounded-full ${s.dot} ${c.status === "act" ? "animate-pulse" : ""}`} />
                 {c.name.split(" ").slice(-1)[0]}
@@ -188,7 +188,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="hidden sm:flex items-center gap-1.5 ml-auto">
           <span className="hidden 2xl:inline px-1.5 py-0.5 border border-amber-400/50 text-[9px] font-mono tracking-wider text-amber-200 whitespace-nowrap">SYNTHETIC CREW</span>
           <button type="button" onClick={() => setModal("sources")} className={btn}><BookOpen className="w-3.5 h-3.5" />Sources</button>
           <button type="button" onClick={() => setModal("qr")} className={btn}><QrCode className="w-3.5 h-3.5" />Join</button>

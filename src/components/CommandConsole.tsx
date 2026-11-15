@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronRight, X } from "lucide-react";
+import { ChevronRight, Mic, X } from "lucide-react";
 import { sfx } from "../utils/sound.ts";
+import { listenOnce, listeningSupported, speak } from "../utils/narrator.ts";
+
+/** Turn console output into one or two warm spoken sentences. */
+function spokenReply(lines: ConsoleLine[]): string {
+  const ok = lines.filter((l) => l.kind === "ok" || l.kind === "warn" || l.kind === "err").map((l) => l.text);
+  const info = lines.filter((l) => l.kind === "info").map((l) => l.text);
+  const first = ok[0] ?? info[0] ?? "";
+  const extra = ok.length && info[0] && info[0].length < 220 ? ` ${info[0]}` : "";
+  return `${first}${extra}`.replace(/\bL(\d)\b/g, "level $1").replace(/CO₂/g, "C O 2");
+}
 
 export type ConsoleLineKind = "cmd" | "ok" | "info" | "warn" | "err";
 export interface ConsoleLine {
@@ -49,7 +59,27 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [lines]);
 
-  const run = (text: string) => {
+  const [listening, setListening] = useState(false);
+  const stopListen = useRef<() => void>(() => {});
+
+  const listen = () => {
+    if (listening) {
+      stopListen.current();
+      setListening(false);
+      return;
+    }
+    setListening(true);
+    stopListen.current = listenOnce((heard, error) => {
+      setListening(false);
+      if (heard) {
+        run(heard, true);
+      } else if (error && error !== "no-speech" && error !== "aborted") {
+        setLines((l) => [...l, { kind: "warn", text: error === "not-allowed" ? "Microphone permission was blocked. Allow it in the browser to use voice." : `Voice input unavailable (${error}).` }]);
+      }
+    });
+  };
+
+  const run = (text: string, spoken = false) => {
     const t = text.trim();
     if (!t) return;
     sfx.key();
@@ -61,8 +91,9 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
       return;
     }
     const out = onRun(t);
-    const echo: ConsoleLine = { kind: "cmd", text: t };
+    const echo: ConsoleLine = { kind: "cmd", text: spoken ? `🎙 ${t}` : t };
     setLines((l) => [...l, echo, ...out].slice(-160));
+    if (spoken) void speak(spokenReply(out));
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -98,7 +129,9 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
         <span className="text-[10px] font-mono uppercase tracking-[0.12em]" style={{ color: accent }}>
           [{scope}]
         </span>
-        <span className="ml-auto text-[9px] font-mono tracking-wider text-slate-500">KERNEL: SYNCED · ` TO TOGGLE</span>
+        <span className="ml-auto text-[9px] font-mono tracking-wider text-slate-500">
+          KERNEL: SYNCED<span className="hidden sm:inline"> · ` TO TOGGLE</span>
+        </span>
         <button type="button" onClick={onClose} aria-label="Close console" className="p-0.5 text-slate-400 hover:text-white">
           <X className="w-3.5 h-3.5" />
         </button>
@@ -145,9 +178,23 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
           onKeyDown={onKey}
           spellCheck={false}
           autoComplete="off"
-          placeholder="SIMULATE HYPOXIA --severity=3   ·   or ask: what happens to bones in space?"
+          placeholder={window.innerWidth < 640 ? "Type a command or a question…" : "SIMULATE HYPOXIA --severity=3   ·   or ask: what happens to bones in space?"}
           className="flex-1 min-w-0 bg-transparent font-mono text-[12px] text-white placeholder:text-slate-600 focus:outline-none"
         />
+        {listeningSupported() && (
+          <button
+            type="button"
+            onClick={listen}
+            aria-pressed={listening}
+            aria-label={listening ? "Stop listening" : "Speak a command"}
+            title="Speak a command. LIFELINE answers out loud."
+            className={`relative p-1.5 border ${listening ? "border-rose-300 text-white bg-rose-500/20" : "text-slate-200 hover:text-white"}`}
+            style={listening ? undefined : { borderColor: `${accent}66` }}
+          >
+            <Mic className="w-4 h-4" />
+            {listening && <span className="sx-em-ping absolute inset-0 border border-rose-300/70" />}
+          </button>
+        )}
       </div>
     </section>
   );

@@ -63,6 +63,24 @@ export interface TelemetryReadout {
   mriSliceY?: number;
 }
 
+/** A choreographed camera move for the guided walkthrough. */
+export interface CinematicShot {
+  focus: { kind: "body" } | { kind: "organ"; id: AnatomyId } | { kind: "emergency" } | { kind: "point"; p: [number, number, number] };
+  /** Camera distance from the focus point (m). */
+  distance: number;
+  /** Horizontal angle around the subject (deg, 0 = front, + = to the subject's left). */
+  azimuth?: number;
+  /** Height angle (deg). */
+  elevation?: number;
+  /** Seconds for the move. */
+  duration?: number;
+  ease?: string;
+  /** After arriving, drift this many degrees around the subject... */
+  orbit?: number;
+  /** ...over this many seconds. */
+  orbitDuration?: number;
+}
+
 export interface ViewportCallbacks {
   onLoadProgress: (pct: number) => void;
   onReady: (isSoftwareGl: boolean) => void;
@@ -163,6 +181,8 @@ export class MedicalViewportController {
   private emergency: EmergencyEngine | null = null;
   private emergencyVisual: EmergencyVisualState | null = null;
   private lastAnchorReported = false;
+  private cinematicActive = false;
+  private orbitTween: gsap.core.Tween | null = null;
   private activeCameraTween: gsap.core.Tween | null = null;
   private activeTargetTween: gsap.core.Tween | null = null;
   private activeRotationTween: gsap.core.Tween | null = null;
@@ -622,6 +642,81 @@ export class MedicalViewportController {
     this.animateCameraTo(pos, aim);
   }
 
+  private shotTarget(focus: CinematicShot["focus"]): THREE.Vector3 | null {
+    if (focus.kind === "point") return new THREE.Vector3(...focus.p);
+    if (focus.kind === "organ") {
+      const c = this.twin?.organCenters[focus.id];
+      if (c) return c.clone();
+      const meta = ANATOMY_BY_ID[focus.id];
+      return meta ? new THREE.Vector3(...meta.focusTarget) : null;
+    }
+    if (focus.kind === "emergency") {
+      if (!this.twin || !this.emergency?.getAnchorLocal(_vec3)) return null;
+      const g = this.twin.twinGroup;
+      const unrotated = new THREE.Matrix4().compose(g.position, new THREE.Quaternion(), g.scale);
+      if (g.parent) unrotated.premultiply(g.parent.matrixWorld);
+      return _vec3.clone().applyMatrix4(unrotated);
+    }
+    return new THREE.Vector3(...CAMERA_PRESETS.reset.target);
+  }
+
+  /** Choreographed camera move: dolly to a framing, then an optional slow orbit while the narrator speaks. */
+  public cinematic(shot: CinematicShot): boolean {
+    const target = this.shotTarget(shot.focus);
+    if (!target) return false;
+    this.cinematicActive = true;
+    this.cancelCameraTweens();
+    const d = shot.distance;
+    const el = THREE.MathUtils.degToRad(shot.elevation ?? 6);
+    const az0 = THREE.MathUtils.degToRad(shot.azimuth ?? 0);
+    const place = (az: number, out: THREE.Vector3) =>
+      out.set(target.x + d * Math.sin(az) * Math.cos(el), target.y + d * Math.sin(el), target.z + d * Math.cos(az) * Math.cos(el));
+    const pos = place(az0, new THREE.Vector3());
+    const duration = this.isSoftwareGl ? Math.min(1, shot.duration ?? 2.4) : shot.duration ?? 2.4;
+    const ease = shot.ease ?? "power3.inOut";
+    const redraw = () => {
+      this.controls.update();
+      if (this.state.animationMode !== "playing") this.requestRender();
+    };
+
+    if (this.twin) {
+      const cur = this.twin.twinGroup.rotation.y;
+      this.twin.twinGroup.rotation.y = Math.atan2(Math.sin(cur), Math.cos(cur));
+      this.activeRotationTween = gsap.to(this.twin.twinGroup.rotation, { y: 0, duration, ease });
+    }
+    this.activeTargetTween = gsap.to(this.controls.target, { x: target.x, y: target.y, z: target.z, duration, ease, onUpdate: redraw });
+    this.activeCameraTween = gsap.to(this.camera.position, {
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      duration,
+      ease,
+      onUpdate: redraw,
+      onComplete: () => {
+        if (!shot.orbit) return;
+        const proxy = { a: az0 };
+        const tmp = new THREE.Vector3();
+        this.orbitTween = gsap.to(proxy, {
+          a: az0 + THREE.MathUtils.degToRad(shot.orbit),
+          duration: shot.orbitDuration ?? 10,
+          ease: "sine.inOut",
+          onUpdate: () => {
+            this.camera.position.copy(place(proxy.a, tmp));
+            redraw();
+          },
+        });
+      },
+    });
+    return true;
+  }
+
+  /** Hand the camera back to the user: stop choreography and resume normal behaviour. */
+  public endCinematic() {
+    this.cinematicActive = false;
+    this.orbitTween?.kill();
+    this.orbitTween = null;
+  }
+
   /** Frame the active emergency's anatomical anchor (e.g. the jugular vein, not the whole torso). */
   public focusOnEmergency(closeZoom = false): boolean {
     if (!this.twin || !this.emergency?.getAnchorLocal(_vec3)) return false;
@@ -707,6 +802,8 @@ export class MedicalViewportController {
   }
 
   private cancelCameraTweens() {
+    this.orbitTween?.kill();
+    this.orbitTween = null;
     this.activeCameraTween?.kill();
     this.activeTargetTween?.kill();
     this.activeRotationTween?.kill();
@@ -1169,6 +1266,9 @@ export class MedicalViewportController {
 
     const onPointerDown = (e: PointerEvent) => {
       this.pointerDownPos = { x: e.clientX, y: e.clientY };
+      // Touching the scene always wins over choreography.
+      this.endCinematic();
+      this.cancelCameraTweens();
     };
 
     const pickTargetAt = (
@@ -1472,7 +1572,7 @@ export class MedicalViewportController {
     if (this.twin) {
       const hasSelection = Boolean(this.state.selectedOrganId || this.state.selectedSuitComponentId);
       // Auto-rotation pauses while an emergency is on screen so it can be inspected.
-      if (playing && !hasSelection && !this.activeCameraTween && !this.emergency?.active) {
+      if (playing && !hasSelection && !this.activeCameraTween && !this.emergency?.active && !this.cinematicActive) {
         this.twin.twinGroup.rotation.y += dt * 0.14;
       }
 

@@ -112,7 +112,7 @@ export function EmergencyTimelineBar({
                   onClick={() => onSetStage(i)}
                   title={`${label} (L${i} ${SEVERITY_META[i].label})`}
                   aria-current={current ? "step" : undefined}
-                  className="group relative flex flex-col items-center px-1"
+                  className="group relative flex flex-col items-center px-2 py-2 -my-2"
                 >
                   <span
                     className={`block w-3 h-3 border-2 rotate-45 transition-all duration-300 ${current ? "scale-125" : ""} ${current && i === 4 ? "animate-pulse" : ""}`}

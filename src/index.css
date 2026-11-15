@@ -164,6 +164,13 @@ input[type="range"]:hover { filter: drop-shadow(0 0 6px rgba(103, 232, 249, 0.7)
 @keyframes sx-em-scanx { from { transform: translateX(-100%); } to { transform: translateX(400%); } }
 .sx-em-scan { animation: sx-em-scanx 0.9s cubic-bezier(0.65, 0, 0.35, 1) both; }
 .sx-em-ping { animation: sx-em-ping 1.8s ease-out infinite; }
+/* Cinematic tour: letterbox bars slide in, captions resolve from blur */
+@keyframes sx-lb-in-top { from { transform: translateY(-100%); } to { transform: none; } }
+@keyframes sx-lb-in-bot { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes sx-type-in { from { opacity: 0; filter: blur(6px); letter-spacing: 0.04em; } to { opacity: 1; filter: none; letter-spacing: normal; } }
+.sx-lb-top { animation: sx-lb-in-top 0.9s cubic-bezier(0.65, 0, 0.35, 1) both; }
+.sx-lb-bot { animation: sx-lb-in-bot 0.9s cubic-bezier(0.65, 0, 0.35, 1) both; }
+.sx-type { animation: sx-type-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .sx-em-cta { animation: sx-em-glow 2.2s ease-in-out infinite; }
 .sx-em-vignette { box-shadow: inset 0 0 140px 14px rgba(255, 49, 88, 0.5); animation: sx-em-vignette 1.1s ease-in-out infinite; }
 .sx-em-vignette.sx-em-calm { box-shadow: inset 0 0 110px 0 rgba(255, 49, 88, 0.26); animation-duration: 2.6s; }

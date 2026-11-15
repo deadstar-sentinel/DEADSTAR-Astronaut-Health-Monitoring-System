@@ -9,11 +9,26 @@ import { THERMAL_DISCLOSURE, getThermalGradientCss } from "../utils/thermalPalet
 import type { SimulationState } from "../utils/simulationState.ts";
 import {
   MedicalViewportController,
+  type CinematicShot,
   type LabelProjection,
   type TelemetryReadout,
 } from "../three/MedicalViewport.ts";
 import { VitalsHud } from "../sentinel/VitalsHud.tsx";
 import { SafeBoundary } from "../sentinel/SafeBoundary.tsx";
+
+/** Drop labels that would sit on top of an earlier one (selected and alert labels win). */
+function cullOverlapping(list: LabelProjection[]): LabelProjection[] {
+  const ranked = [...list].sort((a, b) => Number(b.selected || !!b.alertSeverity) - Number(a.selected || !!a.alertSeverity));
+  const placed: { x: number; y: number; w: number }[] = [];
+  const out: LabelProjection[] = [];
+  for (const l of ranked) {
+    const w = l.name.length * 7.2 + 26;
+    if (placed.some((p) => Math.abs(p.x - l.x) < (p.w + w) / 2 + 2 && Math.abs(p.y - l.y) < 22)) continue;
+    placed.push({ x: l.x, y: l.y, w });
+    out.push(l);
+  }
+  return out;
+}
 
 export interface AnatomyViewportHandle {
   focusCameraPreset: (preset: CameraPresetId) => void;
@@ -21,6 +36,8 @@ export interface AnatomyViewportHandle {
   focusOnSuitComponent: (componentId: SuitComponentId, closeZoom?: boolean) => void;
   /** Returns false when no emergency anchor is available yet. */
   focusOnEmergency: (closeZoom?: boolean) => boolean;
+  cinematic: (shot: CinematicShot) => boolean;
+  endCinematic: () => void;
 }
 
 interface AnatomyViewportProps {
@@ -101,6 +118,12 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         },
         focusOnEmergency(closeZoom = false) {
           return controllerRef.current?.focusOnEmergency(closeZoom) ?? false;
+        },
+        cinematic(shot) {
+          return controllerRef.current?.cinematic(shot) ?? false;
+        },
+        endCinematic() {
+          controllerRef.current?.endCinematic();
         },
       }),
       [],
@@ -219,17 +242,21 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         {/* Emergency: leader line from the affected structure to a floating card */}
         {ready && emergencyHud?.active && emAnchor?.visible && (() => {
           const w = mountRef.current?.clientWidth ?? 800;
-          const flip = emAnchor.x > w - 250;
+          const label = emergencyHud.name.length > 34 ? `${emergencyHud.name.slice(0, 32)}…` : emergencyHud.name;
+          const cardW = Math.min(label.length * 6.6 + 54, w - 16);
+          // Prefer the side with room; on narrow screens clamp the card inside the viewport.
+          const flip = emAnchor.x + 72 + cardW > w - 8 && emAnchor.x - 72 - cardW >= 8 ? true : emAnchor.x > w / 2 && emAnchor.x + 72 + cardW > w - 8;
           const ex = emAnchor.x + (flip ? -64 : 64);
           const ey = Math.max(70, emAnchor.y - 48);
-          const cardX = flip ? ex - 8 : ex + 8;
+          const rawLeft = flip ? ex - 8 - cardW : ex + 8;
+          const cardLeft = Math.max(8, Math.min(w - cardW - 8, rawLeft));
           return (
             <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-testid="emergency-callout">
               <svg className="absolute inset-0 w-full h-full">
                 <circle cx={emAnchor.x} cy={emAnchor.y} r={4} fill={emColor} />
                 <circle cx={emAnchor.x} cy={emAnchor.y} r={9} fill="none" stroke={emColor} strokeOpacity={0.5} className={emShownLevel >= 4 ? "animate-pulse" : ""} />
                 <polyline
-                  points={`${emAnchor.x},${emAnchor.y} ${emAnchor.x + (flip ? -18 : 18)},${ey} ${ex},${ey}`}
+                  points={`${emAnchor.x},${emAnchor.y} ${emAnchor.x + (flip ? -18 : 18)},${ey} ${flip ? cardLeft + cardW : cardLeft},${ey}`}
                   fill="none"
                   stroke={emColor}
                   strokeWidth={1.2}
@@ -237,16 +264,17 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
                 />
               </svg>
               <div
-                className="absolute px-2 py-1 border bg-[#0a0710]/92 text-[10px] font-mono uppercase tracking-wider whitespace-nowrap"
+                className="absolute px-2 py-1 border bg-[#0a0710]/92 text-[10px] font-mono uppercase tracking-wider whitespace-nowrap overflow-hidden text-ellipsis"
                 style={{
-                  left: cardX,
+                  left: cardLeft,
                   top: ey,
-                  transform: `translate(${flip ? "-100%" : "0"}, -50%)`,
+                  maxWidth: cardW,
+                  transform: "translateY(-50%)",
                   borderColor: emColor,
                   color: emColor,
                 }}
               >
-                {emergencyHud.name.length > 34 ? `${emergencyHud.name.slice(0, 32)}…` : emergencyHud.name}
+                {label}
                 <span className="ml-1.5 text-white">L{emShownLevel}</span>
               </div>
             </div>
@@ -437,8 +465,7 @@ export const AnatomyViewport = forwardRef<AnatomyViewportHandle, AnatomyViewport
         {/* Floating holographic 3D-projected anatomical & spacesuit labels */}
         {ready && state.display.showLabels && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            {labels
-              .filter((lbl) => lbl.visible)
+            {cullOverlapping(labels.filter((lbl) => lbl.visible))
               .map((lbl) => {
                 const isAlertCrit = lbl.alertSeverity === "critical";
                 const isAlertWarn = lbl.alertSeverity === "warning";

@@ -14,6 +14,7 @@ import * as spaceweather from "./server/engine/spaceweather.js";
 import * as whatif from "./server/engine/whatif.js";
 import * as fc from "./server/engine/forecast.js";
 import { answerMedicalQuery } from "./server/assistant.js";
+import { synthesize, ttsProvider } from "./server/tts.js";
 import {
   DEFAULT_MISSION,
   ENV_SIGNALS,
@@ -194,6 +195,29 @@ function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts, mis
   }
   return out.slice(0, 4);
 }
+
+// ----------------------------------------------------------------------------- neural narration
+app.get("/api/tts/status", (_req, res) => res.json({ provider: ttsProvider() }));
+
+const ttsHits = new Map(); // ip -> { n, reset }
+app.post("/api/tts", async (req, res) => {
+  const ip = req.ip || "anon";
+  const now = Date.now();
+  const rec = ttsHits.get(ip) ?? { n: 0, reset: now + 60_000 };
+  if (now > rec.reset) Object.assign(rec, { n: 0, reset: now + 60_000 });
+  rec.n += 1;
+  ttsHits.set(ip, rec);
+  if (rec.n > 40) return res.status(429).json({ error: "slow down" });
+  try {
+    const audio = await synthesize(req.body?.text, req.body?.persona);
+    res.set({ "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400" });
+    res.send(audio);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "tts failed";
+    if (msg !== "no-provider") console.error("TTS:", msg);
+    res.status(msg === "no-provider" ? 404 : 502).json({ error: msg === "no-provider" ? "no-provider" : "tts-failed" });
+  }
+});
 
 app.post("/api/assistant", async (req, res, next) => {
   try {
