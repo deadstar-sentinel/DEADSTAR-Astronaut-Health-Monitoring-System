@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, PanelLeft, PanelRight, Play, RotateCcw, SquareTerminal, Volume2, VolumeX } from "lucide-react";
+import { Activity, PanelLeft, PanelRight, Pause, Play, RotateCcw, SquareTerminal, Volume2, VolumeX } from "lucide-react";
 import { CommandConsole, type ConsoleLine } from "./components/CommandConsole.tsx";
 import { DemoOverlay, type DemoState } from "./components/DemoOverlay.tsx";
 import { TourEndCard } from "./components/TourEndCard.tsx";
@@ -518,14 +518,46 @@ export default function App() {
     }
   }, []);
 
-  const stopDemo = useCallback(() => {
+  /** Index of the shot the tour is on (or paused at). Survives pauses, stops and reloads. */
+  const tourStepRef = useRef<number>(0);
+  const [savedStep, setSavedStep] = useState<number>(() => {
+    try {
+      const n = Number(localStorage.getItem("lifeline-tour-step"));
+      return Number.isInteger(n) && n > 0 && n < TOUR.length ? n : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const saveStep = useCallback((i: number) => {
+    tourStepRef.current = i;
+    setSavedStep(i);
+    try {
+      if (i > 0) localStorage.setItem("lifeline-tour-step", String(i));
+      else localStorage.removeItem("lifeline-tour-step");
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  const haltTour = useCallback(() => {
     demoRun.current += 1;
     for (const t of demoTimers.current) window.clearTimeout(t);
     demoTimers.current = [];
     stopSpeaking();
     viewportRef.current?.endCinematic();
-    setDemo(null);
   }, []);
+
+  /** Pause: freeze narration and camera, keep the caption card and the progress. */
+  const pauseDemo = useCallback(() => {
+    haltTour();
+    setDemo((d) => (d && !d.paused ? { ...d, paused: true } : d));
+  }, [haltTour]);
+
+  /** Close the tour overlay but remember where it was, so "Resume" picks up from there. */
+  const stopDemo = useCallback(() => {
+    haltTour();
+    setDemo(null);
+  }, [haltTour]);
 
   const runTourAction = useCallback(
     (a: TourAction) => {
@@ -572,10 +604,18 @@ export default function App() {
     [simulate, handleToggleSuitMode],
   );
 
-  const startDemo = useCallback(() => {
-    stopDemo();
+  const startDemo = useCallback((from = 0) => {
+    haltTour();
     setTourEnd(false);
     unlockAudio();
+    const start = Math.max(0, Math.min(TOUR.length - 1, from));
+    // Resuming mid-tour: replay the earlier shots' scene changes instantly so the
+    // anatomy is in the right state (emergency active, suit on, ...) even if the judge
+    // changed things while paused.
+    if (start > 0) {
+      runTourAction("reset");
+      for (let k = 1; k < start; k++) runTourAction(TOUR[k].action);
+    }
     const run = demoRun.current;
     const alive = () => run === demoRun.current;
     const wait = (ms: number) =>
@@ -583,13 +623,14 @@ export default function App() {
         demoTimers.current.push(window.setTimeout(resolve, ms));
       });
     void (async () => {
-      for (let i = 0; i < TOUR.length; i++) {
+      for (let i = start; i < TOUR.length; i++) {
         if (!alive()) return;
         const s = TOUR[i];
+        saveStep(i);
         const text = audienceRef.current === "expert" ? s.expert : s.simple;
         runTourAction(s.action);
         const hold = Math.max(s.minMs, readMs(text));
-        setDemo({ step: i + 1, total: TOUR.length, title: s.title, caption: text, ms: hold, audience: audienceRef.current, voice: narrateRef.current });
+        setDemo({ step: i + 1, total: TOUR.length, title: s.title, caption: text, ms: hold, audience: audienceRef.current, voice: narrateRef.current, paused: false });
         await wait(s.shotDelay ?? 120);
         if (!alive()) return;
         viewportRef.current?.cinematic(s.shot);
@@ -604,33 +645,66 @@ export default function App() {
       }
       if (!alive()) return;
       viewportRef.current?.endCinematic();
+      saveStep(0);
       setDemo(null);
       setTourEnd(true);
     })();
-  }, [stopDemo, runTourAction]);
+  }, [haltTour, runTourAction, saveStep]);
   const startDemoRef = useRef(startDemo);
   startDemoRef.current = startDemo;
+  const resumeDemo = useCallback(() => startDemo(tourStepRef.current || savedStep), [startDemo, savedStep]);
+  const restartDemo = useCallback(() => {
+    saveStep(0);
+    startDemo(0);
+  }, [saveStep, startDemo]);
 
-  // A real click, key or scroll anywhere outside the caption hands control back to the judge.
+  // Touching the scene while the tour plays PAUSES it (progress kept) instead of resetting.
+  // Volume / media / modifier keys never interrupt; Space toggles pause and resume.
+  const demoPlaying = !!demo && !demo.paused;
   useEffect(() => {
     if (!demo) return;
-    const interrupt = (e: Event) => {
-      if (!e.isTrusted) return;
+    const isTyping = (t: EventTarget | null) => {
+      const el = t as HTMLElement | null;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    };
+    const onPointer = (e: Event) => {
+      if (!e.isTrusted || !demoPlaying) return;
       const t = e.target as HTMLElement | null;
-      if (t?.closest?.("[data-demo-overlay]")) return;
-      stopDemo();
+      // The top bar (sound, Simple/Expert, panels, tour buttons) never interrupts the tour.
+      if (t?.closest?.("[data-demo-overlay]") || t?.closest?.("[data-demo-btn]") || t?.closest?.("header")) return;
+      pauseDemo();
     };
-    window.addEventListener("pointerdown", interrupt, true);
-    window.addEventListener("keydown", interrupt, true);
-    window.addEventListener("wheel", interrupt, true);
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.isTrusted || isTyping(e.target)) return;
+      if (/^(Audio|Media|Volume|F\d|Shift|Control|Alt|Meta|CapsLock|Tab|Fn)/.test(e.key)) return;
+      if (e.key === " ") {
+        e.preventDefault();
+        if (demoPlaying) pauseDemo();
+        else resumeDemo();
+        return;
+      }
+      if (e.key === "Escape") {
+        stopDemo();
+        return;
+      }
+      if (demoPlaying) pauseDemo();
+    };
+    const onHidden = () => {
+      if (document.hidden && demoPlaying) pauseDemo();
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("wheel", onPointer, { capture: true, passive: true });
+    window.addEventListener("keydown", onKey, true);
+    document.addEventListener("visibilitychange", onHidden);
     return () => {
-      window.removeEventListener("pointerdown", interrupt, true);
-      window.removeEventListener("keydown", interrupt, true);
-      window.removeEventListener("wheel", interrupt, true);
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("wheel", onPointer, true);
+      window.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("visibilitychange", onHidden);
     };
-  }, [demo, stopDemo]);
+  }, [demo, demoPlaying, pauseDemo, resumeDemo, stopDemo]);
 
-  useEffect(() => () => stopDemo(), [stopDemo]);
+  useEffect(() => () => haltTour(), [haltTour]);
 
   // /twin#demo (or ?demo) starts the tour on its own once the twin has had time to load.
   useEffect(() => {
@@ -743,15 +817,29 @@ export default function App() {
           <button
             type="button"
             data-testid="demo-btn"
-            onClick={() => (demo ? stopDemo() : startDemo())}
-            title="Self-playing 55-second tour. Click anywhere to take control."
+            data-demo-btn
+            onClick={() => (demoPlaying ? pauseDemo() : demo || savedStep > 0 ? resumeDemo() : startDemo())}
+            title="Self-playing narrated tour. Tap the scene or press Space to pause; your place is saved."
             className={`px-2.5 py-1 border text-[11px] font-mono uppercase flex items-center gap-1 ${
-              demo ? "bg-rose-500/20 border-rose-300 text-white" : "bg-cyan-500/15 border-cyan-300/70 text-cyan-50 hover:bg-cyan-500/25"
+              demoPlaying ? "bg-rose-500/20 border-rose-300 text-white" : "bg-cyan-500/15 border-cyan-300/70 text-cyan-50 hover:bg-cyan-500/25"
             }`}
           >
-            <Play className="w-3 h-3" />
-            {demo ? "Stop tour" : "Demo tour"}
+            {demoPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            {demoPlaying ? "Pause tour" : demo?.paused || savedStep > 0 ? `Resume ${(demo?.paused ? demo.step - 1 : savedStep) + 1}/${TOUR.length}` : "Demo tour"}
           </button>
+          {!demoPlaying && (demo?.paused || savedStep > 0) && (
+            <button
+              type="button"
+              data-demo-btn
+              data-testid="demo-restart-btn"
+              onClick={restartDemo}
+              title="Restart the tour from the beginning"
+              aria-label="Restart tour"
+              className="px-1.5 py-1 border border-cyan-300/50 text-cyan-100 hover:bg-cyan-500/20"
+            >
+              <RotateCcw className="w-3 h-3" />
+            </button>
+          )}
           <div className="flex items-center border border-cyan-500/30" role="group" aria-label="Explanation level">
             {(["simple", "expert"] as Audience[]).map((a) => (
               <button
@@ -965,10 +1053,7 @@ export default function App() {
 
       {tourEnd && !demo && (
         <TourEndCard
-          onReplay={() => {
-            setTourEnd(false);
-            startDemo();
-          }}
+          onReplay={restartDemo}
           onClose={() => setTourEnd(false)}
         />
       )}
@@ -976,6 +1061,9 @@ export default function App() {
         <DemoOverlay
           demo={demo}
           onStop={stopDemo}
+          onPause={pauseDemo}
+          onResume={resumeDemo}
+          onRestart={restartDemo}
           onToggleVoice={() => {
             const next = !narrateRef.current;
             narrateRef.current = next;
