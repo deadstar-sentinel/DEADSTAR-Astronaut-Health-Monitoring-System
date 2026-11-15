@@ -16,6 +16,34 @@ const AZURE_VOICES = {
   deep: () => process.env.AZURE_TTS_VOICE_DEEP?.trim() || "en-US-AndrewMultilingualNeural",
 };
 
+/** Shortlists for the audition page. Only these IDs (or the env defaults) may be requested. */
+export const SHORTLIST = {
+  elevenlabs: [
+    { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", persona: "warm", note: "Soft, warm, reassuring (recommended)" },
+    { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", persona: "warm", note: "Friendly, gentle, inviting" },
+    { id: "XB0fDUnXU5powFXDhCwa", name: "Charlotte", persona: "warm", note: "Smooth, intimate, cinematic" },
+    { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily", persona: "warm", note: "Warm British, calm" },
+    { id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel", persona: "warm", note: "Calm, clear, classic narrator" },
+    { id: "nPczCjzI2devNBz1zQrb", name: "Brian", persona: "deep", note: "Deep, resonant, trustworthy (recommended)" },
+    { id: "JBFqnCBsd6RHKfiVNtZT", name: "George", persona: "deep", note: "Warm British, storyteller" },
+    { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", persona: "deep", note: "Authoritative, broadcast" },
+    { id: "pNInz6obpgDQGcFmaJgB", name: "Adam", persona: "deep", note: "Deep, firm, steady" },
+    { id: "pqHfZKP75CvOlQylNhV4", name: "Bill", persona: "deep", note: "Mature, wise, documentary" },
+  ],
+  azure: [
+    { id: "en-US-AvaMultilingualNeural", name: "Ava", persona: "warm", note: "Warm, expressive (recommended)" },
+    { id: "en-US-EmmaMultilingualNeural", name: "Emma", persona: "warm", note: "Bright, friendly" },
+    { id: "en-US-JennyNeural", name: "Jenny", persona: "warm", note: "Clear, caring" },
+    { id: "en-US-AriaNeural", name: "Aria", persona: "warm", note: "Confident, natural" },
+    { id: "en-GB-SoniaNeural", name: "Sonia", persona: "warm", note: "Warm British" },
+    { id: "en-US-AndrewMultilingualNeural", name: "Andrew", persona: "deep", note: "Warm, deep, trustworthy (recommended)" },
+    { id: "en-US-BrianMultilingualNeural", name: "Brian", persona: "deep", note: "Relaxed, resonant" },
+    { id: "en-US-DavisNeural", name: "Davis", persona: "deep", note: "Deep, calm" },
+    { id: "en-US-GuyNeural", name: "Guy", persona: "deep", note: "Steady, broadcast" },
+    { id: "en-GB-RyanNeural", name: "Ryan", persona: "deep", note: "Warm British" },
+  ],
+};
+
 export function ttsProvider() {
   if (process.env.ELEVENLABS_API_KEY?.trim()) return "elevenlabs";
   if (process.env.AZURE_SPEECH_KEY?.trim() && process.env.AZURE_SPEECH_REGION?.trim()) return "azure";
@@ -24,8 +52,8 @@ export function ttsProvider() {
 
 const esc = (s) => s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]);
 
-async function elevenlabs(text, persona) {
-  const voice = ELEVEN_VOICES[persona]();
+async function elevenlabs(text, persona, voiceId) {
+  const voice = voiceId || ELEVEN_VOICES[persona]();
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`, {
     method: "POST",
     headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY.trim(), "Content-Type": "application/json", Accept: "audio/mpeg" },
@@ -41,9 +69,9 @@ async function elevenlabs(text, persona) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-async function azure(text, persona) {
+async function azure(text, persona, voiceId) {
   const region = process.env.AZURE_SPEECH_REGION.trim();
-  const voice = AZURE_VOICES[persona]();
+  const voice = voiceId || AZURE_VOICES[persona]();
   const style = persona === "warm" ? "friendly" : "calm";
   const ssml =
     `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">` +
@@ -64,20 +92,22 @@ async function azure(text, persona) {
 }
 
 /** Returns MP3 audio for the text, or throws. */
-export async function synthesize(rawText, rawPersona) {
+export async function synthesize(rawText, rawPersona, rawVoice) {
   const provider = ttsProvider();
   if (!provider) throw new Error("no-provider");
   const text = String(rawText || "").replace(/\s+/g, " ").trim().slice(0, MAX_CHARS);
   if (!text) throw new Error("empty");
   const persona = rawPersona === "deep" ? "deep" : "warm";
-  const key = crypto.createHash("sha1").update(`${provider}|${persona}|${text}`).digest("hex");
+  // Only shortlisted voices may be requested from the browser.
+  const voiceId = SHORTLIST[provider].some((v) => v.id === rawVoice) ? rawVoice : null;
+  const key = crypto.createHash("sha1").update(`${provider}|${persona}|${voiceId}|${text}`).digest("hex");
   const hit = cache.get(key);
   if (hit) {
     cache.delete(key);
     cache.set(key, hit);
     return hit;
   }
-  const audio = provider === "elevenlabs" ? await elevenlabs(text, persona) : await azure(text, persona);
+  const audio = provider === "elevenlabs" ? await elevenlabs(text, persona, voiceId) : await azure(text, persona, voiceId);
   cache.set(key, audio);
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
   return audio;

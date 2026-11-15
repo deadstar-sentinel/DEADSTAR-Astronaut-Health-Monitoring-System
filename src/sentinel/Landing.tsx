@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { ChevronDown, Play, Square } from "lucide-react";
+import { ChevronDown, Play, Square, Volume2, VolumeX } from "lucide-react";
+import { prefetch, speak, stopSpeaking, unlockAudio } from "../utils/narrator.ts";
 import { EARTH_CAM_Z, EARTH_X, ParticleStage, SHIP_X, earthSceneFit, type StageRig } from "./ParticleStage.tsx";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -297,6 +298,36 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
     };
   }, []);
 
+  // The film plays scene by scene so the narrator stays in sync: glide, speak, hold, next.
+  const filmRun = useRef(0);
+  const [voiceOn, setVoiceOn] = useState(() => {
+    try {
+      return localStorage.getItem("lifeline-narration") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const voiceRef = useRef(voiceOn);
+  voiceRef.current = voiceOn;
+  const lines = [
+    "Somewhere between Earth and Mars, four people are farther from home than anyone has ever been. When something goes wrong, there is no hospital, and no time to wait. I'm Lifeline. I'm the flight surgeon who stays with them.",
+    `Every word they send home crosses the dark at the speed of light, and still takes ${Number(s.owltMin).toFixed(1)} minutes to arrive. By the time Earth answers, the moment may already be gone.`,
+    `${s.crewName}'s temperature, heart rate and heart-rate variability are drifting together. A ${Math.round(Number(s.feverPct))} percent chance of fever, within a day. Earth's reply would come too late. So I don't wait. I act, here, on board.`,
+    "Every crew member lives in me as a digital twin, organ by organ, heartbeat by heartbeat. Each one is linked to NASA's seventeen Human Research Program risks, and forecast hour by hour, honestly, with its uncertainty shown.",
+    "I'm built on live NASA and NOAA space weather and JPL orbit data, with physiology calibrated to published NASA findings. The crew you'll meet is simulated, and every forecast I make is graded against its own record.",
+    "Four astronauts. One of them needs you, right now. Welcome to mission control.",
+  ];  const linesRef = useRef(lines);
+  linesRef.current = lines;
+
+  // Leaving film mode (manual scroll, swipe, key, Stop) silences the narrator.
+  useEffect(() => {
+    if (!film) {
+      filmRun.current += 1;
+      stopSpeaking();
+    }
+  }, [film]);
+  useEffect(() => () => stopSpeaking(), []);
+
   const toggleFilm = () => {
     const sc = scroller.current;
     if (!sc) return;
@@ -305,10 +336,41 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       setFilm(false);
       return;
     }
-    const end = sc.scrollHeight - sc.clientHeight;
-    const remaining = Math.max(0.05, 1 - sc.scrollTop / end);
+    unlockAudio();
     setFilm(true);
-    gsap.to(sc, { scrollTop: end, duration: 46 * remaining, ease: "none", overwrite: true, onComplete: () => setFilm(false) });
+    const run = ++filmRun.current;
+    const alive = () => run === filmRun.current;
+    const wait = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+    void (async () => {
+      const start = nearest();
+      for (let i = start; i < STOPS.length; i++) {
+        if (!alive()) return;
+        if (i !== start || i === 0) goTo(i, i === start ? 1.2 : 2.4);
+        await wait(i === start ? 900 : 2200);
+        if (!alive()) return;
+        const text = linesRef.current[i];
+        const next = linesRef.current[i + 1];
+        if (next && voiceRef.current) prefetch(next);
+        const t0 = Date.now();
+        if (voiceRef.current) await speak(text);
+        const minHold = Math.round(text.split(/\s+/).length * 300 + 1200);
+        const rest = minHold - (Date.now() - t0);
+        if (rest > 0) await wait(voiceRef.current ? 700 : rest);
+      }
+      if (alive()) setFilm(false);
+    })();
+  };
+
+  const toggleVoice = () => {
+    const next = !voiceOn;
+    setVoiceOn(next);
+    voiceRef.current = next;
+    if (!next) stopSpeaking();
+    try {
+      localStorage.setItem("lifeline-narration", next ? "on" : "off");
+    } catch {
+      /* private mode */
+    }
   };
 
   const title = "LIFELINE";
@@ -447,6 +509,16 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
             <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
               <button type="button" onClick={toggleFilm} className={`${ui} px-3 py-1.5 flex items-center gap-1.5`} title="Play the whole story hands-free">
                 {film ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}{film ? "Stop" : "Play film"}
+              </button>
+              <button
+                type="button"
+                onClick={toggleVoice}
+                aria-pressed={voiceOn}
+                aria-label={voiceOn ? "Mute the narrator" : "Turn the narrator on"}
+                title={voiceOn ? "Narrator on" : "Narrator off"}
+                className={`${ui} px-2 py-1.5`}
+              >
+                {voiceOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
               </button>
               <button type="button" onClick={leave} className={`${ui} px-3 py-1.5`}>Skip ›</button>
             </div>

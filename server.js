@@ -14,7 +14,7 @@ import * as spaceweather from "./server/engine/spaceweather.js";
 import * as whatif from "./server/engine/whatif.js";
 import * as fc from "./server/engine/forecast.js";
 import { answerMedicalQuery } from "./server/assistant.js";
-import { synthesize, ttsProvider } from "./server/tts.js";
+import { SHORTLIST, synthesize, ttsProvider } from "./server/tts.js";
 import {
   DEFAULT_MISSION,
   ENV_SIGNALS,
@@ -197,7 +197,10 @@ function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts, mis
 }
 
 // ----------------------------------------------------------------------------- neural narration
-app.get("/api/tts/status", (_req, res) => res.json({ provider: ttsProvider() }));
+app.get("/api/tts/status", (_req, res) => {
+  const provider = ttsProvider();
+  res.json({ provider, voices: provider ? SHORTLIST[provider] : [], shortlist: SHORTLIST });
+});
 
 const ttsHits = new Map(); // ip -> { n, reset }
 app.post("/api/tts", async (req, res) => {
@@ -209,7 +212,7 @@ app.post("/api/tts", async (req, res) => {
   ttsHits.set(ip, rec);
   if (rec.n > 40) return res.status(429).json({ error: "slow down" });
   try {
-    const audio = await synthesize(req.body?.text, req.body?.persona);
+    const audio = await synthesize(req.body?.text, req.body?.persona, req.body?.voice);
     res.set({ "Content-Type": "audio/mpeg", "Cache-Control": "public, max-age=86400" });
     res.send(audio);
   } catch (e) {
