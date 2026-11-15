@@ -58,7 +58,7 @@ export function QrPanel() {
     <div className="flex flex-col sm:flex-row gap-4 items-center">
       <div className="w-48 h-48 bg-white p-2 shrink-0 [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: svg ?? "" }} />
       <div className="text-sm text-slate-200 space-y-2">
-        <p><b className="text-white">Be the 5th crew member.</b> Scan to take the 3-minute psychomotor vigilance test (PVT) NASA uses for fatigue. Your result streams into LIFELINE live.</p>
+        <p><b className="text-white">Be the 5th crew member.</b> Scan, then tap <b className="text-white">Reaction test · Start</b> under "Today's measurements": a 30-second version of the psychomotor vigilance test (PVT) NASA uses for fatigue. Your result streams into LIFELINE live.</p>
         <p className="font-mono text-[11px] text-cyan-300 break-all">{url}</p>
       </div>
     </div>
