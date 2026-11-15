@@ -59,7 +59,7 @@ export const TOUR: TourShot[] = [
     simple:
       "Here's the skull and brain. On long missions, fluid shifts toward the head and can change the eyes, so I keep a close watch on them.",
     expert:
-      "In X-ray, the reconstructed skull and brain. Spaceflight-associated neuro-ocular syndrome, linked to the headward fluid shift, is tracked through optic nerve sheath diameter and refraction.",
+      "Here, the brain within its reconstructed skull. Spaceflight-associated neuro-ocular syndrome, linked to the headward fluid shift, is tracked through optic nerve sheath diameter and refraction.",
   },
   {
     title: "Emergency",

@@ -35,7 +35,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 /** QR to the phone PVT test (/astronaut): judges scan it, take the reaction test, and appear in the crew data live. */
-function QrPanel() {
+export function QrPanel() {
   const [svg, setSvg] = useState<string | null>(null);
   const url = `${window.location.origin}/astronaut`;
   useEffect(() => {

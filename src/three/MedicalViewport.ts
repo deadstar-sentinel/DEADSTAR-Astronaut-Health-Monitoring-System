@@ -1014,7 +1014,10 @@ export class MedicalViewportController {
       } else if (mode === "xray") {
         entry.mesh.material = mats.xray;
         mats.xray.uniforms.uIntensity.value = visualizationIntensity;
-        mats.xray.uniforms.uOpacity.value = isSelected ? 0.98 : modeOpacity;
+        // The cranial dome is a large closed shell: drawn at full X-ray density it reads as a white
+        // helmet. Keep it faint so the face, orbits and jaw read like a radiograph.
+        const shell = entry.mesh.name === "PROC_skull_vault" || entry.mesh.name === "PROC_skull_occiput";
+        mats.xray.uniforms.uOpacity.value = shell ? (isSelected ? 0.4 : 0.28) : isSelected ? 0.98 : modeOpacity;
         mats.xray.uniforms.uHighlight.value = isSelected ? 1.0 : 0.0;
         mats.xray.uniforms.uDimmed.value = dimmed ? 1.0 : 0.0;
       } else if (mode === "realistic" || (mode === "muscular" && entry.role === "muscle")) {

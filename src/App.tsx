@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, PanelLeft, PanelRight, Play, RotateCcw, SquareTerminal, Volume2, VolumeX } from "lucide-react";
 import { CommandConsole, type ConsoleLine } from "./components/CommandConsole.tsx";
 import { DemoOverlay, type DemoState } from "./components/DemoOverlay.tsx";
+import { TourEndCard } from "./components/TourEndCard.tsx";
 import { HELP_LINES, parseCommand } from "./utils/commandParser.ts";
 import { setSoundEnabled, sfx, soundEnabled } from "./utils/sound.ts";
 import { prefetch, speak, stopSpeaking, unlockAudio } from "./utils/narrator.ts";
@@ -360,6 +361,7 @@ export default function App() {
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [soundOn, setSoundOn] = useState(soundEnabled);
   const [demo, setDemo] = useState<DemoState | null>(null);
+  const [tourEnd, setTourEnd] = useState(false);
   const demoTimers = useRef<number[]>([]);
   const emergencyRef = useRef(emergency);
   emergencyRef.current = emergency;
@@ -539,7 +541,8 @@ export default function App() {
         case "chest":
           break;
         case "xray_head":
-          setState((prev) => setVisualizationMode(prev, "xray"));
+          // Holographic shows the detailed brain (folded hemispheres, cerebellum, brainstem) best.
+          setState((prev) => setVisualizationMode(prev, "holographic"));
           break;
         case "co2_l1":
           setState((prev) => setVisualizationMode(prev, "holographic"));
@@ -571,6 +574,7 @@ export default function App() {
 
   const startDemo = useCallback(() => {
     stopDemo();
+    setTourEnd(false);
     unlockAudio();
     const run = demoRun.current;
     const alive = () => run === demoRun.current;
@@ -601,6 +605,7 @@ export default function App() {
       if (!alive()) return;
       viewportRef.current?.endCinematic();
       setDemo(null);
+      setTourEnd(true);
     })();
   }, [stopDemo, runTourAction]);
   const startDemoRef = useRef(startDemo);
@@ -958,6 +963,15 @@ export default function App() {
         onAskAiAlert={handleAskAiAlert}
       />
 
+      {tourEnd && !demo && (
+        <TourEndCard
+          onReplay={() => {
+            setTourEnd(false);
+            startDemo();
+          }}
+          onClose={() => setTourEnd(false)}
+        />
+      )}
       {demo && (
         <DemoOverlay
           demo={demo}
