@@ -19,14 +19,10 @@ export function DemoOverlay({
   demo,
   onStop,
   onToggleVoice,
-  persona,
-  onPersona,
 }: {
   demo: DemoState;
   onStop: () => void;
   onToggleVoice: () => void;
-  persona: "warm" | "deep";
-  onPersona: (p: "warm" | "deep") => void;
 }) {
   return (
     <>
@@ -60,20 +56,6 @@ export function DemoOverlay({
               <div className="flex gap-1 flex-1" aria-hidden="true">
                 {Array.from({ length: demo.total }, (_, i) => (
                   <span key={i} className={`h-1 flex-1 max-w-6 transition-colors duration-500 ${i < demo.step ? "bg-cyan-300" : "bg-cyan-500/20"}`} />
-                ))}
-              </div>
-              <div className="flex border border-cyan-400/40" role="group" aria-label="Narrator voice">
-                {(["warm", "deep"] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => onPersona(p)}
-                    aria-pressed={persona === p}
-                    title={p === "warm" ? "Warm female narrator" : "Deep male narrator"}
-                    className={`px-1.5 py-1 text-[10px] font-mono uppercase ${persona === p ? "bg-cyan-500/25 text-white" : "text-slate-400 hover:text-white"}`}
-                  >
-                    {p}
-                  </button>
                 ))}
               </div>
               <button

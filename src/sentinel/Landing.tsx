@@ -3,6 +3,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ChevronDown, Play, Square, Volume2, VolumeX } from "lucide-react";
 import { prefetch, speak, stopSpeaking, unlockAudio } from "../utils/narrator.ts";
+import { filmLines } from "../data/filmScript.ts";
 import { EARTH_CAM_Z, EARTH_X, ParticleStage, SHIP_X, earthSceneFit, type StageRig } from "./ParticleStage.tsx";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -309,14 +310,8 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
   });
   const voiceRef = useRef(voiceOn);
   voiceRef.current = voiceOn;
-  const lines = [
-    "Somewhere between Earth and Mars, four people are farther from home than anyone has ever been. When something goes wrong, there is no hospital, and no time to wait. I'm Lifeline. I'm the flight surgeon who stays with them.",
-    `Every word they send home crosses the dark at the speed of light, and still takes ${Number(s.owltMin).toFixed(1)} minutes to arrive. By the time Earth answers, the moment may already be gone.`,
-    `${s.crewName}'s temperature, heart rate and heart-rate variability are drifting together. A ${Math.round(Number(s.feverPct))} percent chance of fever, within a day. Earth's reply would come too late. So I don't wait. I act, here, on board.`,
-    "Every crew member lives in me as a digital twin, organ by organ, heartbeat by heartbeat. Each one is linked to NASA's seventeen Human Research Program risks, and forecast hour by hour, honestly, with its uncertainty shown.",
-    "I'm built on live NASA and NOAA space weather and JPL orbit data, with physiology calibrated to published NASA findings. The crew you'll meet is simulated, and every forecast I make is graded against its own record.",
-    "Four astronauts. One of them needs you, right now. Welcome to mission control.",
-  ];  const linesRef = useRef(lines);
+  const lines = filmLines(Number(s.owltMin));
+  const linesRef = useRef(lines);
   linesRef.current = lines;
 
   // Leaving film mode (manual scroll, swipe, key, Stop) silences the narrator.

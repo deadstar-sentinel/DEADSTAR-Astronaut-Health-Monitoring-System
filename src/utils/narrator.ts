@@ -5,6 +5,8 @@
  * sentence (Chrome stops very long utterances), and every call resolves even if speech fails.
  */
 
+import { textKey } from "./textKey.ts";
+
 export type VoicePersona = "warm" | "deep";
 
 /** Deep, steady male voices, best first. */
@@ -139,6 +141,9 @@ function audioFor(text: string): Promise<string | null> {
 
 /** Fetch a line ahead of time so the next shot starts speaking instantly. */
 export function prefetch(text: string) {
+  void recordedUrl(text).then((url) => {
+    if (url) void fetch(url).catch(() => {});
+  });
   void neuralProvider().then((prov) => {
     if (prov) void audioFor(text);
   });
@@ -180,12 +185,33 @@ function playNeural(url: string, my: number): Promise<void> {
   });
 }
 
-/** Speak text warmly: neural voice when the server has one, browser voice otherwise. */
+/* ---- Pre-generated narration (Sonia, en-GB neural), shipped as files in /narration ---- */
+let manifest: Promise<Record<string, string> | null> | null = null;
+function narrationManifest(): Promise<Record<string, string> | null> {
+  if (!manifest) {
+    manifest = fetch("/narration/manifest.json")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { files?: Record<string, string> } | null) => j?.files ?? null)
+      .catch(() => null);
+  }
+  return manifest;
+}
+
+async function recordedUrl(text: string): Promise<string | null> {
+  const files = await narrationManifest();
+  const f = files?.[textKey(text)];
+  return f ? `/narration/${f}` : null;
+}
+
+/** Speak a line: recorded narration first, then a server neural voice, then the browser voice. */
 export async function speak(text: string): Promise<void> {
   if (!text.trim()) return;
   const my = ++generation;
   synth()?.cancel();
   player?.pause();
+  const recorded = await recordedUrl(text);
+  if (my !== generation) return;
+  if (recorded) return playNeural(recorded, my);
   if (await neuralProvider()) {
     const url = await audioFor(text);
     if (my !== generation) return;

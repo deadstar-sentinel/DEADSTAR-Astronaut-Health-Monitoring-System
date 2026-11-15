@@ -4,7 +4,7 @@ import { CommandConsole, type ConsoleLine } from "./components/CommandConsole.ts
 import { DemoOverlay, type DemoState } from "./components/DemoOverlay.tsx";
 import { HELP_LINES, parseCommand } from "./utils/commandParser.ts";
 import { setSoundEnabled, sfx, soundEnabled } from "./utils/sound.ts";
-import { getPersona, prefetch, setPersona, speak, stopSpeaking, unlockAudio, type VoicePersona } from "./utils/narrator.ts";
+import { prefetch, speak, stopSpeaking, unlockAudio } from "./utils/narrator.ts";
 import { TOUR, readMs, type Audience, type TourAction } from "./data/tourScript.ts";
 import { ANATOMY_BY_ID, VISUALIZATION_MODES } from "./data/anatomyCatalog.ts";
 import { SEVERITY_META, severityHex } from "./data/emergencyScenarios.ts";
@@ -503,7 +503,6 @@ export default function App() {
   const audienceRef = useRef(audience);
   audienceRef.current = audience;
   const [narrate, setNarrate] = useState(true);
-  const [persona, setPersonaState] = useState<VoicePersona>(getPersona);
   const narrateRef = useRef(narrate);
   narrateRef.current = narrate;
   const demoRun = useRef(0);
@@ -969,11 +968,6 @@ export default function App() {
             setNarrate(next);
             if (!next) stopSpeaking();
             setDemo((d) => (d ? { ...d, voice: next } : d));
-          }}
-          persona={persona}
-          onPersona={(p) => {
-            setPersona(p);
-            setPersonaState(p);
           }}
         />
       )}
