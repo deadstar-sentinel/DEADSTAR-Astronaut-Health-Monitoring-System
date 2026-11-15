@@ -58,7 +58,7 @@ function QrPanel() {
     <div className="flex flex-col sm:flex-row gap-4 items-center">
       <div className="w-48 h-48 bg-white p-2 shrink-0 [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: svg ?? "" }} />
       <div className="text-sm text-slate-200 space-y-2">
-        <p><b className="text-white">Be the 5th crew member.</b> Scan to take the 3-minute psychomotor vigilance test (PVT) NASA uses for fatigue. Your result streams into SENTINEL live.</p>
+        <p><b className="text-white">Be the 5th crew member.</b> Scan to take the 3-minute psychomotor vigilance test (PVT) NASA uses for fatigue. Your result streams into LIFELINE live.</p>
         <p className="font-mono text-[11px] text-cyan-300 break-all">{url}</p>
       </div>
     </div>
@@ -122,7 +122,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
   const [modal, setModal] = useState<"qr" | "sources" | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   if (!mission) {
-    return <div className="h-12 shrink-0 bg-[#040d1c] border-b border-cyan-500/15 px-3 flex items-center text-[11px] font-mono text-slate-400">Connecting to SENTINEL engine…</div>;
+    return <div className="h-12 shrink-0 bg-[#040d1c] border-b border-cyan-500/15 px-3 flex items-center text-[11px] font-mono text-slate-400">Connecting to LIFELINE engine…</div>;
   }
   const crew = mission.crew.find((c) => c.id === crewId) ?? mission.crew[0];
   const co2 = mission.env.co2;
@@ -218,7 +218,7 @@ export function MissionBar({ onOpenOrgan }: { onOpenOrgan: (id: AnatomyId) => vo
           {top.act_within_min != null && earthReplyMin != null && (
             <span className="font-mono text-[11px] text-slate-200">
               act within {top.act_within_min < 120 ? `${top.act_within_min} min` : `${Math.round(top.act_within_min / 60)} h`} · Earth reply {earthReplyMin.toFixed(1)} min
-              <b className={`ml-2 ${onBoard ? "text-rose-200" : "text-cyan-200"}`}>{onBoard ? "→ SENTINEL ACTS ON BOARD" : "→ time to consult Earth"}</b>
+              <b className={`ml-2 ${onBoard ? "text-rose-200" : "text-cyan-200"}`}>{onBoard ? "→ LIFELINE ACTS ON BOARD" : "→ time to consult Earth"}</b>
             </span>
           )}
           <span className="ml-auto flex items-center gap-2 shrink-0">

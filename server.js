@@ -104,7 +104,7 @@ app.get("/", (_req, res) => {
 });
 app.get(["/crew", "/astronaut"], (_req, res) => res.sendFile(path.join(STATIC, "astronaut.html")));
 app.get("/holo", (_req, res) => res.sendFile(path.join(STATIC, "holo.html")));
-// Original SENTINEL mission console (ECG, risk matrix, scorecard, PVT guests), linked from the app.
+// Original LIFELINE mission console (ECG, risk matrix, scorecard, PVT guests), linked from the app.
 app.get("/console", (_req, res) => res.sendFile(path.join(STATIC, "index.html")));
 // Direct link into mission control (skips the intro). Serve the production build when present.
 app.get("/twin", (_req, res) => {
@@ -152,7 +152,7 @@ function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts, mis
       earth_reply_min: al.earth_reply_min ?? null,
       onboard: Boolean(onboard),
       steps: proto.steps,
-      source: "SENTINEL engine alert + onboard protocol library",
+      source: "LIFELINE engine alert + onboard protocol library",
     });
     if (out.length >= 3) break;
   }
@@ -171,7 +171,7 @@ function proposeProtocols({ crewId, selectedOrganId, suitActive, suitAlerts, mis
         act_within_min: null,
         earth_reply_min: null,
         onboard: false,
-        steps: [risks[top.id].recommendation, "SENTINEL keeps forecasting; escalate only if the 80 % band crosses the threshold."],
+        steps: [risks[top.id].recommendation, "LIFELINE keeps forecasting; escalate only if the 80 % band crosses the threshold."],
         source: `NASA HRP risk: ${top.name}`,
       });
     }
@@ -600,7 +600,7 @@ app.use((err, _req, res, _next) => {
 
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`DEADSTAR SENTINEL listening on http://0.0.0.0:${PORT}`);
+  console.log(`DEADSTAR LIFELINE listening on http://0.0.0.0:${PORT}`);
   setImmediate(() => {
     try {
       getState();

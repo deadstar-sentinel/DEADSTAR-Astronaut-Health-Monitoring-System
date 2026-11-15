@@ -1,8 +1,8 @@
-# DEADSTAR SENTINEL
+# DEADSTAR LIFELINE
 
-**On Mars, the doctor is up to 22 light-minutes away. SENTINEL is not.**
+**On Mars, the doctor is up to 22 light-minutes away. LIFELINE is not.**
 
-SENTINEL is an autonomous medical officer and predictive digital twin for astronauts on missions beyond real-time reach of Earth. It forecasts each crew member's health from 24 hours to mission end with calibrated confidence, explains every alert in the language of NASA's 17 Human Research Program risks, tells the crew whether a problem is the **ship or their body**, and acts onboard when Earth's answer would arrive too late.
+LIFELINE is an autonomous medical officer and predictive digital twin for astronauts on missions beyond real-time reach of Earth. It forecasts each crew member's health from 24 hours to mission end with calibrated confidence, explains every alert in the language of NASA's 17 Human Research Program risks, tells the crew whether a problem is the **ship or their body**, and acts onboard when Earth's answer would arrive too late.
 
 Built for the NASA Space Apps Challenge 2026 — *Create Health Monitoring Software for Astronauts on Space Missions* — Kuwait local event, Team DEADSTAR.
 
@@ -15,7 +15,7 @@ Built for the NASA Space Apps Challenge 2026 — *Create Health Monitoring Softw
 | **Threshold probabilities** | "P(fever ≥ 38.0 °C in 24 h)", "P(≥ 10 % hip bone loss by mission end)", "P(optic nerve sheath ≥ 6 mm)" |
 | **Early warning** | Circadian- and sleep-adjusted anomaly detection; an infection-like pattern is flagged hours before fever |
 | **Ship vs. body** | Crew-wide deviations with cabin CO₂ above NASA's 3 mmHg 1-hour limit → the ship; one person's deviation with normal air → the body |
-| **Light-delay autonomy** | Today's real Earth–Mars light time from JPL orbital elements; SENTINEL acts onboard when round trip + ground time exceeds the action deadline |
+| **Light-delay autonomy** | Today's real Earth–Mars light time from JPL orbital elements; LIFELINE acts onboard when round trip + ground time exceeds the action deadline |
 | **17 HRP risks** | Every score maps to NASA's own risk page |
 | **What-if countermeasures** | Exercise, sleep, bisphosphonates, B-vitamins (NASA B-Complex), thigh cuffs (NASA Thigh Cuff), storm-shelter compliance |
 | **Holographic body twin** | Three.js hologram, organs coloured by risk, heart beating at the live heart rate, mission-day morph (fluid shift, leg and bone loss); Pepper's-ghost mode for a tablet pyramid |
@@ -59,6 +59,6 @@ Any serial device that prints `{"hr":72,"spo2":98}` or `HR:72,SPO2:98` per line 
 
 ## Honesty
 
-Crew data is synthetic, calibrated to NASA-published rates; names are fictional. What-if effect sizes are literature-informed estimates; B-Complex and Thigh Cuff effects are hypotheses under test. SENTINEL is decision support, not a medical device.
+Crew data is synthetic, calibrated to NASA-published rates; names are fictional. What-if effect sizes are literature-informed estimates; B-Complex and Thigh Cuff effects are hypotheses under test. LIFELINE is decision support, not a medical device.
 
 See [`docs/METHODS.md`](docs/METHODS.md) and [`docs/DATASETS.md`](docs/DATASETS.md).

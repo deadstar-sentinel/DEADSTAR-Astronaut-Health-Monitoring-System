@@ -21,7 +21,7 @@ If cabin ppCO₂ exceeds NASA's 3 mmHg 1-hour limit and most of the crew show si
 Two-process model of sleep regulation (Borbély 1982; Daan et al. 1984): homeostatic pressure rises with τ = 18.2 h awake and falls with τ = 4.2 h asleep; a 24 h circadian process peaks at 16:48. Alertness at the task is compared with a well-rested 23:00–07:00 schedule.
 
 ## Autonomy
-SENTINEL acts onboard when Earth's answer — round-trip light time + 30 minutes of ground assessment — would arrive after the alert's action deadline, or during solar-conjunction blackout (Sun–Earth–Mars angle < 3°).
+LIFELINE acts onboard when Earth's answer — round-trip light time + 30 minutes of ground assessment — would arrive after the alert's action deadline, or during solar-conjunction blackout (Sun–Earth–Mars angle < 3°).
 
 ## Data
 Crew data is synthetic and calibrated to NASA-published rates; the storylines (latent-virus reactivation, SANS progression, sleep restriction) play out in the latest hours so the console is always live. Uploaded CSVs replace the synthetic streams.

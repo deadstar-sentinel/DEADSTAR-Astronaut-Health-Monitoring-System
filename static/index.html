@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DEADSTAR SENTINEL — Flight Surgeon Console</title>
+<title>DEADSTAR LIFELINE — Flight Surgeon Console</title>
 <meta name="description" content="Predictive digital twin and autonomous medical officer for astronauts beyond real-time reach of Earth.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%235ce1e6' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%235ce1e6'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/css/app.css">
@@ -17,7 +17,7 @@
       <circle cx="16" cy="16" r="6" fill="none" stroke="#5ce1e6" stroke-width="1" opacity=".55"/>
       <circle cx="16" cy="16" r="2.2" fill="#e6edf3"/>
     </svg>
-    <div class="brand-name">DEADSTAR<small>SENTINEL · v1.0</small></div>
+    <div class="brand-name">DEADSTAR<small>LIFELINE · v1.0</small></div>
   </div>
   <div><div class="seg" id="missionSeg" role="tablist" aria-label="Mission profile"></div></div>
   <div class="clock">
@@ -125,7 +125,7 @@
     <div class="ask">
       <div class="answer" id="answer"></div>
       <form id="askForm" autocomplete="off">
-        <input id="askInput" placeholder="Ask SENTINEL — e.g. Is Vasquez cleared for the burn?" aria-label="Ask SENTINEL">
+        <input id="askInput" placeholder="Ask LIFELINE — e.g. Is Vasquez cleared for the burn?" aria-label="Ask LIFELINE">
         <button class="btn iconbtn" type="button" id="micBtn" title="Ask by voice"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="2" width="5" height="8" rx="2.5"/><path d="M3.5 8a4.5 4.5 0 009 0M8 12.5V14"/></svg></button>
         <button class="btn primary" type="submit">Ask</button>
       </form>
@@ -172,7 +172,7 @@
       <p class="deck-lead" id="earthLead">—</p>
       <div class="race">
         <div class="race-side">
-          <h3>Onboard — SENTINEL</h3>
+          <h3>Onboard — LIFELINE</h3>
           <div class="race-clock mono" id="shipClock">00:00</div>
           <div class="muted" id="shipStatus" style="font-size:12px">Select an alert, then send.</div>
           <ul class="race-log" id="shipLog"></ul>
@@ -217,7 +217,7 @@
     </div>
 
     <div class="deck-pane" id="pane-data">
-      <p class="deck-lead">Plug in real data. Upload a CSV with a <b>timestamp</b> column, an <b>astronaut</b> column (id or name) and any signals (heart_rate, spo2, temperature, systolic, diastolic, hrv, respiratory_rate, sleep_hours, glucose, mood …). SENTINEL maps the columns, aligns them to the mission clock and re-forecasts.</p>
+      <p class="deck-lead">Plug in real data. Upload a CSV with a <b>timestamp</b> column, an <b>astronaut</b> column (id or name) and any signals (heart_rate, spo2, temperature, systolic, diastolic, hrv, respiratory_rate, sleep_hours, glucose, mood …). LIFELINE maps the columns, aligns them to the mission clock and re-forecasts.</p>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <label class="btn primary" style="cursor:pointer"><input type="file" id="csvFile" accept=".csv,text/csv" hidden>Upload CSV</label>
         <a class="btn" href="/api/template.csv">Download template</a>
@@ -239,7 +239,7 @@
     <div class="deck-pane" id="pane-methods"></div>
 
     <div class="footer-note">
-      <span>DEADSTAR SENTINEL is decision support, not a medical device. Crew data is synthetic and calibrated to NASA-published rates; names are fictional.</span>
+      <span>DEADSTAR LIFELINE is decision support, not a medical device. Crew data is synthetic and calibrated to NASA-published rates; names are fictional.</span>
       <span class="mono">NASA Space Apps Challenge 2026 · Kuwait · Team DEADSTAR</span>
     </div>
   </section>
@@ -249,7 +249,7 @@
 <div class="tip" id="tip"></div>
 <div class="boot" id="boot"><div class="boot-in">
   <svg viewBox="0 0 32 32" width="44" height="44" aria-hidden="true"><circle cx="16" cy="16" r="12.5" fill="none" stroke="#5ce1e6" stroke-width="1.2" stroke-dasharray="58 8 6 6"><animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16" dur="6s" repeatCount="indefinite"/></circle><circle cx="16" cy="16" r="6" fill="none" stroke="#5ce1e6" stroke-width="1" opacity=".55"/><circle cx="16" cy="16" r="2.2" fill="#e6edf3"/></svg>
-  <div class="boot-title">DEADSTAR <span>SENTINEL</span></div>
+  <div class="boot-title">DEADSTAR <span>LIFELINE</span></div>
   <div class="boot-sub">Autonomous medical officer · predictive crew digital twin</div>
   <pre class="boot-log" id="bootLog"></pre>
   <div class="boot-bar"><span id="bootBar"></span></div>

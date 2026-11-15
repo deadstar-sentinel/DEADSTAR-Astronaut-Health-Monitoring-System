@@ -12,6 +12,7 @@ function Root() {
     try {
       return (
         window.location.hash === "#app" ||
+        window.location.hash === "#demo" ||
         window.location.pathname === "/twin" ||
         sessionStorage.getItem(KEY) === "1"
       );

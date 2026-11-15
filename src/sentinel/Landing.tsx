@@ -78,7 +78,7 @@ function Scene({ i, side, children }: { i: number; side: "left" | "right" | "cen
 
 const DUR = 5.6;                                   // master timeline length (one unit = one scene)
 const STOPS = [0, 1.36, 2.42, 3.42, 4.42, 5.4];     // where each scene rests
-const NAMES = ["Sentinel", "The distance", "The decision", "The twin", "The proof", "Enter"];
+const NAMES = ["Lifeline", "The distance", "The decision", "The twin", "The proof", "Enter"];
 
 /* ------------------------------------------------------------------ landing */
 export function Landing({ onEnter }: { onEnter: () => void }) {
@@ -308,7 +308,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
     gsap.to(sc, { scrollTop: end, duration: 46 * remaining, ease: "none", overwrite: true, onComplete: () => setFilm(false) });
   };
 
-  const title = "SENTINEL";
+  const title = "LIFELINE";
   const ui = "pointer-events-auto border border-white/25 bg-black/40 backdrop-blur text-[11px] font-mono uppercase tracking-[0.2em] text-slate-200 hover:border-cyan-300 hover:text-white";
 
   return (
@@ -374,7 +374,7 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
                   </div>
                 </div>
                 <div className="verdict mt-9 inline-block px-5 py-3 border-2 border-rose-300 text-xl sm:text-3xl font-semibold tracking-[0.12em] text-rose-100 shadow-[0_0_60px_rgba(251,113,133,0.45)] bg-rose-500/10">
-                  SENTINEL ACTS ON BOARD
+                  LIFELINE ACTS ON BOARD
                 </div>
                 <p className="verdict-note mt-4 text-slate-300">The onboard infection protocol starts now. Earth gets a compressed report and can overrule, but the crew never waits on physics.</p>
               </Scene>
@@ -488,7 +488,7 @@ export function BootOverlay() {
     <div ref={ref} className="pointer-events-none fixed inset-0 z-[80] bg-[#02060f] flex items-center justify-center" style={{ clipPath: "inset(0 0 0% 0)" }}>
       <div className="boot-scan absolute left-0 right-0 h-px bg-cyan-300 shadow-[0_0_30px_6px_rgba(103,232,249,0.8)]" />
       <div className="font-mono text-[13px] text-cyan-100 space-y-1.5">
-        {["Linking JPL ephemeris · light time computed", "Loading crew twins · 4 astronauts", "Forecasts calibrated · 80/95 % bands", "SENTINEL ONLINE"].map((t, i) => (
+        {["Linking JPL ephemeris · light time computed", "Loading crew twins · 4 astronauts", "Forecasts calibrated · 80/95 % bands", "LIFELINE ONLINE"].map((t, i) => (
           <div key={t} className={`boot-line ${i === 3 ? "text-white text-base tracking-[0.3em] pt-2" : ""}`}>{i < 3 ? "▸ " : ""}{t}</div>
         ))}
       </div>

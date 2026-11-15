@@ -1,4 +1,4 @@
-// SENTINEL body twin (Three.js).
+// LIFELINE body twin (Three.js).
 //
 // Views:  hologram · realistic · x-ray        Wear:  cabin  ·  NASA Z2 exploration suit (EVA)
 // - Anatomical human (Mixamo "X Bot" rig from the three.js examples) with a live idle animation.

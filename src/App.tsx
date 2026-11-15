@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, PanelLeft, PanelRight, RotateCcw } from "lucide-react";
+import { Activity, PanelLeft, PanelRight, Play, RotateCcw, SquareTerminal, Volume2, VolumeX } from "lucide-react";
+import { CommandConsole, type ConsoleLine } from "./components/CommandConsole.tsx";
+import { DemoOverlay, type DemoState } from "./components/DemoOverlay.tsx";
+import { HELP_LINES, parseCommand } from "./utils/commandParser.ts";
+import { setSoundEnabled, sfx, soundEnabled } from "./utils/sound.ts";
+import { ANATOMY_BY_ID, VISUALIZATION_MODES } from "./data/anatomyCatalog.ts";
+import { SEVERITY_META, severityHex } from "./data/emergencyScenarios.ts";
 import type {
   AnatomyId,
   AnimationMode,
@@ -345,6 +351,305 @@ export default function App() {
     };
   }, [emergency]);
 
+  /* ---------------- Command console, guided demo tour, soundscape ---------------- */
+
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [soundOn, setSoundOn] = useState(soundEnabled);
+  const [demo, setDemo] = useState<DemoState | null>(null);
+  const demoTimers = useRef<number[]>([]);
+  const emergencyRef = useRef(emergency);
+  emergencyRef.current = emergency;
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const simulate = useCallback((id: string, severity: number | null) => {
+    setEmergency((prev) => {
+      let next = setEmergencyModeOpen(prev, true);
+      next = activateScenario(previewScenario(next, id), id, Date.now(), suitScenarioRef.current);
+      return severity === null ? next : setEmergencyStage(next, severity);
+    });
+    setRightOpen(true);
+  }, []);
+
+  const runCommand = useCallback(
+    (text: string): ConsoleLine[] => {
+      const a = parseCommand(text);
+      const em = emergencyRef.current;
+      const active = em.activeScenarioId ? EMERGENCY_BY_ID[em.activeScenarioId] : null;
+      switch (a.kind) {
+        case "help":
+          return HELP_LINES.map(([c, d]) => ({ kind: "info" as const, text: `${c.padEnd(40)} ${d}` }));
+        case "status": {
+          const st = stateRef.current;
+          const lines: ConsoleLine[] = [
+            { kind: "info", text: `Twin: ${st.suitActive ? "astronaut spacesuit" : "normal human"} · mode ${st.mode} · selected ${st.selectedOrganId ?? "none"}${st.isolated ? " (isolated)" : ""}` },
+          ];
+          if (active) {
+            lines.push({
+              kind: em.stage >= 3 ? "warn" : "ok",
+              text: `Emergency: ${active.name} · L${em.stage} ${SEVERITY_META[em.stage].label} · ${active.stages[Math.min(em.stage, active.stages.length - 1)]}${em.paused ? " · PAUSED" : ""} · view ${em.view}`,
+            });
+          } else lines.push({ kind: "info", text: em.modeOpen ? "Emergency mode open, no scenario running." : "No emergency running." });
+          lines.push({ kind: "info", text: "All values are simulated demonstration data." });
+          return lines;
+        }
+        case "clear":
+          return [];
+        case "demo":
+          window.setTimeout(() => startDemoRef.current(), 50);
+          return [{ kind: "ok", text: "Starting the guided tour. Click anywhere to take control." }];
+        case "scan":
+          handleViewportSelectOrgan(a.organ, true);
+          return [{ kind: "ok", text: `Focusing ${ANATOMY_BY_ID[a.organ].name}.` }];
+        case "isolate":
+          setState((prev) => ({ ...selectOrgan(prev, a.organ), isolated: true }));
+          viewportRef.current?.focusOnOrgan(a.organ, true);
+          return [{ kind: "ok", text: `Isolating ${ANATOMY_BY_ID[a.organ].name}. Type RESET VIEW or press Esc to restore.` }];
+        case "simulate": {
+          const s = EMERGENCY_BY_ID[a.scenarioId];
+          simulate(a.scenarioId, a.severity);
+          return [
+            { kind: "ok", text: `Simulating ${s.name}${a.severity !== null ? ` at L${a.severity}` : ""}.` },
+            { kind: "info", text: s.mechanism },
+            { kind: "info", text: `Evidence: ${s.evidence === "documented" ? "documented spaceflight risk" : s.evidence === "associated" ? "spaceflight-associated change" : s.evidence === "general" ? "general medical emergency" : "hypothetical teaching case"}.` },
+          ];
+        }
+        case "severity":
+          if (!active) return [{ kind: "warn", text: "No emergency running. Try SIMULATE HYPOXIA first." }];
+          setEmergency((prev) => setEmergencyStage(prev, a.level));
+          return [{ kind: "ok", text: `Severity set to L${Math.min(a.level, active.stages.length - 1)}.` }];
+        case "step":
+          if (!active) return [{ kind: "warn", text: "No emergency running." }];
+          setEmergency((prev) => stepEmergencyStage(prev, a.delta));
+          return [{ kind: "ok", text: a.delta > 0 ? "Escalating one stage." : "De-escalating one stage." }];
+        case "reset":
+          if (!active) {
+            setState((prev) => restoreCompleteBody(selectOrgan(prev, null)));
+            viewportRef.current?.focusCameraPreset("reset");
+            return [{ kind: "ok", text: "View reset to the full body." }];
+          }
+          setEmergency((prev) => stopEmergency(prev));
+          return [{ kind: "ok", text: `${active.name} reset. Anatomy recovering to normal.` }];
+        case "pause":
+          setEmergency((prev) => setEmergencyPaused(prev, a.paused));
+          return [{ kind: "ok", text: a.paused ? "Simulation paused." : "Simulation resumed." }];
+        case "view":
+          setEmergency((prev) => setEmergencyView(prev, a.view));
+          return [{ kind: "ok", text: `View: ${a.view}.` }];
+        case "suit":
+          handleToggleSuitMode(a.on);
+          return [{ kind: "ok", text: a.on ? "Astronaut spacesuit on." : "Normal human anatomy." }];
+        case "mode":
+          handleSelectMode(a.mode);
+          return [{ kind: "ok", text: `Mode: ${VISUALIZATION_MODES.find((m) => m.id === a.mode)?.label ?? a.mode}.` }];
+        case "emergency":
+          handleToggleEmergency(a.on);
+          return [{ kind: "ok", text: a.on ? "Emergency simulation mode open." : "Emergency simulation mode closed." }];
+        default:
+          return [
+            { kind: "err", text: `Not understood: "${a.text}". Type HELP for commands.` },
+            ...(a.suggestion ? [{ kind: "info" as const, text: `Did you mean: SIMULATE ${a.suggestion.toUpperCase()}` }] : []),
+          ];
+      }
+    },
+    [handleViewportSelectOrgan, handleToggleSuitMode, handleSelectMode, handleToggleEmergency, simulate],
+  );
+
+  // Console scope and one-click commands follow the current selection.
+  const consoleScope = useMemo(() => {
+    const active = emergency.activeScenarioId ? EMERGENCY_BY_ID[emergency.activeScenarioId] : null;
+    if (active) return `EMERGENCY · ${active.category.toUpperCase()}`;
+    const o = state.selectedOrganId;
+    if (o === "brain" || o === "nervous") return "NEURO-CRANIAL";
+    if (o === "heart" || o === "circulatory" || o === "lungs") return "CARDIOPULMONARY";
+    if (o === "skeletal" || o === "spine" || o === "muscular") return "MUSCULOSKELETAL";
+    if (o) return ANATOMY_BY_ID[o].name.toUpperCase();
+    return state.suitActive ? "EVA SUIT" : "FULL BODY";
+  }, [emergency.activeScenarioId, state.selectedOrganId, state.suitActive]);
+
+  const consoleChips = useMemo(() => {
+    if (emergency.activeScenarioId) return ["STATUS", "UP", "DOWN", "VIEW COMPARE", "PAUSE", "RESET"];
+    const o = state.selectedOrganId;
+    if (o === "brain" || o === "nervous") return ["SIMULATE SANS --severity=3", "SIMULATE VESTIBULAR", "SIMULATE HYPOXIA --severity=4"];
+    if (o === "heart" || o === "circulatory") return ["SIMULATE CLOT --severity=3", "SIMULATE ARRHYTHMIA", "SIMULATE HEART ATTACK"];
+    if (o === "lungs") return ["SIMULATE HYPERCAPNIA --severity=4", "SIMULATE HYPOXIA --severity=3", "SIMULATE SCRUBBER FAILURE"];
+    if (o === "skeletal" || o === "spine") return ["SIMULATE BONE LOSS --severity=3", "SIMULATE FRACTURE --severity=4"];
+    if (o === "muscular") return ["SIMULATE ATROPHY --severity=3", "SIMULATE MUSCLE INJURY"];
+    if (o === "kidneys") return ["SIMULATE KIDNEY STONE --severity=4", "SIMULATE DEHYDRATION"];
+    return ["HELP", "STATUS", "SIMULATE CLOT --severity=3", "SIMULATE HYPERCAPNIA --severity=4", "SCAN BRAIN", "DEMO"];
+  }, [emergency.activeScenarioId, state.selectedOrganId]);
+
+  const consoleAccent = emergency.activeScenarioId
+    ? severityHex(displayedLevel(emergency))
+    : state.selectedOrganId === "brain" || state.selectedOrganId === "nervous"
+      ? "#7B61FF"
+      : state.selectedOrganId === "heart" || state.selectedOrganId === "lungs" || state.selectedOrganId === "circulatory"
+        ? "#00E599"
+        : "#00E5FF";
+
+  // Guided tour: ~55 s, every step a real app action. Any click or key takes control.
+  const stopDemo = useCallback(() => {
+    for (const t of demoTimers.current) window.clearTimeout(t);
+    demoTimers.current = [];
+    setDemo(null);
+  }, []);
+
+  const startDemo = useCallback(() => {
+    stopDemo();
+    const steps: { at: number; title: string; caption?: string; run: () => void }[] = [
+      {
+        at: 0,
+        title: "Mission",
+        caption: "DEADSTAR LIFELINE is an onboard flight surgeon for crews minutes of light-time from Earth: when Earth's answer would arrive too late, it acts on board.",
+        run: () => {
+          setConsoleOpen(false);
+          setEmergency((prev) => setEmergencyModeOpen(prev, false));
+          setState((prev) => restoreCompleteBody(selectOrgan(setVisualizationMode(toggleSuitMode(prev, false), "holographic"), null)));
+          viewportRef.current?.focusCameraPreset("reset");
+        },
+      },
+      {
+        at: 6500,
+        title: "Digital twin",
+        caption: "Each organ is tied to NASA's 17 Human Research Program risks and forecast hour by hour, with honest uncertainty bands.",
+        run: () => handleSelectOrgan("brain", true),
+      },
+      {
+        at: 13000,
+        title: "Emergency",
+        caption: "Emergency simulation: the CO₂ scrubber starts to fail. Only the affected structures change colour.",
+        run: () => {
+          setState((prev) => selectOrgan(prev, null));
+          simulate("co2_scrubber_failure", 1);
+        },
+      },
+      { at: 17000, title: "Emergency", run: () => setEmergency((prev) => setEmergencyStage(prev, 2)) },
+      {
+        at: 20000,
+        title: "Escalation",
+        caption: "CO₂ builds up in the lungs instead of being cleared. At critical level the whole HUD warns, but the data stays readable.",
+        run: () => setEmergency((prev) => setEmergencyStage(prev, 4)),
+      },
+      {
+        at: 26000,
+        title: "In the suit",
+        caption: "Inside the spacesuit the suit turns see-through, and the same failure drives the suit's AI telemetry warnings.",
+        run: () => handleToggleSuitMode(true),
+      },
+      {
+        at: 33000,
+        title: "Countermeasure",
+        caption: "Countermeasure: switch to backup CO₂ removal. The anatomy recovers to normal without reloading anything.",
+        run: () => setEmergency((prev) => stopEmergency(prev)),
+      },
+      {
+        at: 38500,
+        title: "Documented risk",
+        caption: "Observed on the ISS: stagnant flow and a clot in the jugular vein. Blood backs up behind the obstruction.",
+        run: () => {
+          handleToggleSuitMode(false);
+          simulate("venous_thrombosis", 2);
+        },
+      },
+      { at: 42500, title: "Documented risk", run: () => setEmergency((prev) => setEmergencyStage(prev, 3)) },
+      {
+        at: 48000,
+        title: "Your turn",
+        caption: "Every value is labelled simulated, measured or predicted. Your turn: click any organ, or open the console and type HELP.",
+        run: () => {
+          setEmergency((prev) => setEmergencyModeOpen(prev, false));
+          setState((prev) => selectOrgan(prev, null));
+          viewportRef.current?.focusCameraPreset("reset");
+        },
+      },
+      { at: 55000, title: "End", run: () => setDemo(null) },
+    ];
+    const captioned = steps.filter((s) => s.caption);
+    let shown = 0;
+    steps.forEach((s, i) => {
+      const id = window.setTimeout(() => {
+        s.run();
+        if (s.caption) {
+          shown += 1;
+          const nextCaptioned = steps.slice(i + 1).find((x) => x.caption || x.title === "End");
+          setDemo({ step: shown, total: captioned.length, title: s.title, caption: s.caption, ms: (nextCaptioned?.at ?? s.at + 6000) - s.at });
+        }
+      }, s.at);
+      demoTimers.current.push(id);
+    });
+  }, [stopDemo, handleSelectOrgan, handleToggleSuitMode, simulate]);
+
+  const startDemoRef = useRef(startDemo);
+  startDemoRef.current = startDemo;
+
+  // A real click, key or scroll anywhere outside the caption hands control back to the judge.
+  useEffect(() => {
+    if (!demo) return;
+    const interrupt = (e: Event) => {
+      if (!e.isTrusted) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-demo-overlay]")) return;
+      stopDemo();
+    };
+    window.addEventListener("pointerdown", interrupt, true);
+    window.addEventListener("keydown", interrupt, true);
+    window.addEventListener("wheel", interrupt, true);
+    return () => {
+      window.removeEventListener("pointerdown", interrupt, true);
+      window.removeEventListener("keydown", interrupt, true);
+      window.removeEventListener("wheel", interrupt, true);
+    };
+  }, [demo, stopDemo]);
+
+  useEffect(() => () => stopDemo(), [stopDemo]);
+
+  // /twin#demo (or ?demo) starts the tour on its own once the twin has had time to load.
+  useEffect(() => {
+    if (!/demo/.test(window.location.hash + window.location.search)) return;
+    const id = window.setTimeout(() => startDemoRef.current(), 3500);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  // Sound cues follow the simulation; button ticks are global.
+  const prevStage = useRef<{ id: string | null; stage: number }>({ id: null, stage: 0 });
+  useEffect(() => {
+    const prev = prevStage.current;
+    const id = emergency.activeScenarioId;
+    if (id && (id !== prev.id || emergency.stage !== prev.stage)) {
+      if (emergency.stage >= 4) sfx.critical();
+      else if (emergency.stage >= 3) sfx.warn();
+      else sfx.ping();
+    } else if (!id && prev.id) sfx.recover();
+    prevStage.current = { id, stage: emergency.stage };
+  }, [emergency.activeScenarioId, emergency.stage]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.("button")) sfx.click();
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
+  const toggleSound = useCallback(() => {
+    setSoundOn((on) => {
+      setSoundEnabled(!on);
+      return !on;
+    });
+  }, []);
+
+  // ` toggles the console (ignored while typing elsewhere).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "`" || (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA") && t.id !== "lifeline-console-input")) return;
+      e.preventDefault();
+      setConsoleOpen((o) => !o);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -385,7 +690,7 @@ export default function App() {
 
           <div className="flex items-baseline gap-2.5 min-w-0">
             <h1 className="text-sm font-semibold tracking-[0.16em] uppercase text-white truncate">
-              DEADSTAR SENTINEL
+              DEADSTAR LIFELINE
             </h1>
             <span
               className={`hidden sm:inline text-[10px] font-mono uppercase tracking-[0.14em] truncate ${
@@ -402,9 +707,44 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          <span className="hidden lg:inline text-[10px] font-mono uppercase tracking-[0.12em] text-slate-400">
+          <span className="hidden 2xl:inline text-[10px] font-mono uppercase tracking-[0.12em] text-slate-400">
             Non-Diagnostic Visualization Layer
           </span>
+
+          <button
+            type="button"
+            data-testid="demo-btn"
+            onClick={() => (demo ? stopDemo() : startDemo())}
+            title="Self-playing 55-second tour. Click anywhere to take control."
+            className={`px-2.5 py-1 border text-[11px] font-mono uppercase flex items-center gap-1 ${
+              demo ? "bg-rose-500/20 border-rose-300 text-white" : "bg-cyan-500/15 border-cyan-300/70 text-cyan-50 hover:bg-cyan-500/25"
+            }`}
+          >
+            <Play className="w-3 h-3" />
+            {demo ? "Stop tour" : "Demo tour"}
+          </button>
+          <button
+            type="button"
+            data-testid="console-btn"
+            onClick={() => setConsoleOpen((o) => !o)}
+            aria-pressed={consoleOpen}
+            title="Command console (` key)"
+            className="px-2 py-1 border border-cyan-500/30 text-[11px] font-mono uppercase text-cyan-100 hover:border-cyan-300 flex items-center gap-1"
+          >
+            <SquareTerminal className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Console</span>
+          </button>
+          <button
+            type="button"
+            data-testid="sound-btn"
+            onClick={toggleSound}
+            aria-pressed={soundOn}
+            aria-label={soundOn ? "Mute interface sounds" : "Turn on interface sounds"}
+            title={soundOn ? "Sound on" : "Sound off"}
+            className="p-1.5 border border-cyan-500/30 text-cyan-100 hover:border-cyan-300"
+          >
+            {soundOn ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
 
           {state.suitActive && (
             <button
@@ -529,6 +869,15 @@ export default function App() {
           onOpenMonitoringHud={handleOpenMonitoringHud}
         />
         )}
+
+        <CommandConsole
+          open={consoleOpen}
+          onClose={() => setConsoleOpen(false)}
+          onRun={runCommand}
+          scope={consoleScope}
+          chips={consoleChips}
+          accent={consoleAccent}
+        />
       </main>
 
       {emergency.modeOpen ? (
@@ -569,6 +918,8 @@ export default function App() {
         onInspectComponent={handleInspectAlertComponent}
         onAskAiAlert={handleAskAiAlert}
       />
+
+      {demo && <DemoOverlay demo={demo} onStop={stopDemo} />}
     </div>
     </SentinelProvider>
   );

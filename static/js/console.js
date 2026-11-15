@@ -351,7 +351,7 @@ function renderAlerts() {
           <div class="row"><span class="k">Must act within</span><span>${fmtMin(a.act_within_min)}</span></div>
           <div class="row"><span class="k">Earth round trip</span><span>${fmtMin(a.earth_round_trip_min)}</span></div>
           <div class="row"><span class="k">Earth answer, incl. ground team</span><span>${fmtMin(a.earth_reply_min)}</span></div>
-          <div class="decision ${a.autonomous ? "auto" : ""}">${a.autonomous ? "▶ SENTINEL ACTS ONBOARD — Earth would answer too late" : "◇ CONSULT EARTH — time allows a ground decision"}</div>
+          <div class="decision ${a.autonomous ? "auto" : ""}">${a.autonomous ? "▶ LIFELINE ACTS ONBOARD — Earth would answer too late" : "◇ CONSULT EARTH — time allows a ground decision"}</div>
         </div>
         ${a.lead_hours ? `<div class="stat-row"><span class="k">Early warning lead time</span><span class="v" style="color:var(--accent)">${a.lead_hours} h before forecast fever</span></div>` : ""}
         ${proto ? `<div class="lbl" style="margin-top:10px">${esc(proto.title)}</div><ol class="steps">${proto.steps.map((s, i) => `<li class="${done.includes(i) ? "done" : ""}"><input type="checkbox" data-step="${i}" ${done.includes(i) ? "checked" : ""}><span>${esc(s)}</span></li>`).join("")}</ol>` : ""}
@@ -406,7 +406,7 @@ async function ask(q) {
   const a = $("#answer"); a.style.display = "block"; a.innerHTML = `<span class="dim">Thinking…</span>`;
   try {
     const r = await post("/api/ask", { q, crew: S.crew });
-    a.innerHTML = `${esc(r.text)}<span class="src">${r.engine === "claude" ? "Claude" : "SENTINEL rules engine"} · grounded in: ${esc((r.facts || []).join(", "))}</span>`;
+    a.innerHTML = `${esc(r.text)}<span class="src">${r.engine === "claude" ? "Claude" : "LIFELINE rules engine"} · grounded in: ${esc((r.facts || []).join(", "))}</span>`;
     talk(r.text);
     if (r.crew && r.crew !== S.crew) selectCrew(r.crew, false);
   } catch (e) { a.textContent = "No answer: " + e.message; }
@@ -536,7 +536,7 @@ function race(a, ow) {
   const proto = S.meta.protocols[a.protocol];
   const steps = proto ? proto.steps.slice(0, 4) : [];
   let shown = 0;
-  $("#shipStatus").textContent = "SENTINEL executing onboard protocol";
+  $("#shipStatus").textContent = "LIFELINE executing onboard protocol";
   $("#earthStatus").textContent = `Packet in flight · ${kb.toFixed(1)} kB · time-warp ×${fmt(speed, 0)}`;
   S.raceTimer = setInterval(() => {
     const el = (performance.now() - start) / 1000 * speed;    // simulated seconds
@@ -548,7 +548,7 @@ function race(a, ow) {
     pkt.style.left = (frac * 100) + "%";
     if (el < ow) { $("#earthClock").textContent = "−" + mmss(ow - el); }
     else if (el < ow + 1800) { $("#earthClock").textContent = mmss(el - ow); $("#earthStatus").textContent = "Received. Ground team assessing…"; pkt.style.left = "100%"; }
-    if (el >= 2 * ow + 1800) { clearInterval(S.raceTimer); S._resolved = false; $("#earthStatus").innerHTML = `Reply reaches the ship at T+${mmss(2 * ow + 1800)} — <span style="color:var(--accent)">SENTINEL had already acted.</span>`; }
+    if (el >= 2 * ow + 1800) { clearInterval(S.raceTimer); S._resolved = false; $("#earthStatus").innerHTML = `Reply reaches the ship at T+${mmss(2 * ow + 1800)} — <span style="color:var(--accent)">LIFELINE had already acted.</span>`; }
   }, 100);
   S._resolved = false;
 }
@@ -610,7 +610,7 @@ function renderMethods() {
   const src = Object.values(S.meta.sources);
   $("#pane-methods").innerHTML = `<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:32px">
     <div>
-      <p class="deck-lead"><b>How SENTINEL thinks.</b></p>
+      <p class="deck-lead"><b>How LIFELINE thinks.</b></p>
       <ol class="muted" style="font-size:12.5px;line-height:1.65;padding-left:18px;margin:0">
         <li><b style="color:var(--ink)">Digital twin per astronaut.</b> Hourly wearable vitals and daily measures, compared with each person's own baseline, not a population average.</li>
         <li><b style="color:var(--ink)">Vitals forecasting (1 h – 7 d).</b> Seasonal hour-of-day profile over 14 days + linear drift + a persistent residual and damped trend. Intervals are split-conformal from rolling-origin backtests; coverage is reported on held-out origins.</li>
@@ -618,7 +618,7 @@ function renderMethods() {
         <li><b style="color:var(--ink)">Early warning.</b> Circadian- and sleep-adjusted robust z-scores; a sustained joint rise in temperature and heart rate with falling HRV flags an infection-like pattern.</li>
         <li><b style="color:var(--ink)">Ship vs. body.</b> A deviation shared by most of the crew while cabin CO₂ exceeds NASA's 3 mmHg 1-hour limit is attributed to the ship; one person's deviation with normal cabin air is attributed to the body.</li>
         <li><b style="color:var(--ink)">Readiness.</b> Two-process model of sleep regulation driven by actigraphy sleep history and the planned schedule.</li>
-        <li><b style="color:var(--ink)">Autonomy.</b> SENTINEL acts onboard when Earth's answer (round-trip light time + 30 min ground assessment) would arrive after the action deadline, or during conjunction blackout.</li>
+        <li><b style="color:var(--ink)">Autonomy.</b> LIFELINE acts onboard when Earth's answer (round-trip light time + 30 min ground assessment) would arrive after the action deadline, or during conjunction blackout.</li>
         <li><b style="color:var(--ink)">Honesty.</b> Crew data is synthetic, calibrated to NASA-published rates. Effect sizes in the what-if panel are literature-informed estimates; B-Complex and Thigh Cuff effects are hypotheses under test. Decision support, not diagnosis.</li>
       </ol>
     </div>
@@ -672,7 +672,7 @@ function bootStart() {
   const add = (html, pct) => { log.insertAdjacentHTML("beforeend", html + "\n"); bar.style.width = pct + "%"; };
   (async () => {
     const wait = ms => new Promise(r => setTimeout(r, ms));
-    add(`<span class="k">[ sys ]</span> SENTINEL core online`, 8); await wait(380);
+    add(`<span class="k">[ sys ]</span> LIFELINE core online`, 8); await wait(380);
     add(`<span class="k">[ link ]</span> crew biomonitors … 4/4 linked  <span class="ok">✓</span>`, 22); await wait(420);
     add(`<span class="k">[ nasa ]</span> HRP risk model · 17 risks · evidence priors loaded  <span class="ok">✓</span>`, 38); await wait(420);
     while (!ready && !skipped) await wait(80);
@@ -702,7 +702,7 @@ function renderSitrep(rotate) {
   let nums = "";
   if (a.fever_prob_24h != null) nums = `<span class="sep">·</span> P(fever ≥ 38 °C, 24 h) <span class="num">${pctNum(a.fever_prob_24h)}%</span>${a.fever_in_h ? ` <span class="sep">·</span> crossing in <span class="num">${a.fever_in_h} h</span>` : ""}${a.detected_hours_ago != null ? ` <span class="sep">·</span> flagged <span class="num">${a.detected_hours_ago} h</span> ago` : ""}`;
   else nums = `<span class="sep">·</span> <span class="muted">${esc(a.detail.split(". ")[0])}</span>`;
-  const dec = a.autonomous ? `EARTH REPLY ${Math.round(a.earth_reply_min)} MIN &gt; ${Math.round(a.act_within_min)} MIN DEADLINE → SENTINEL ACTING ONBOARD` : `TIME ALLOWS A GROUND DECISION · ${fmtMin(a.earth_reply_min)}`;
+  const dec = a.autonomous ? `EARTH REPLY ${Math.round(a.earth_reply_min)} MIN &gt; ${Math.round(a.act_within_min)} MIN DEADLINE → LIFELINE ACTING ONBOARD` : `TIME ALLOWS A GROUND DECISION · ${fmtMin(a.earth_reply_min)}`;
   el.className = `sitrep ${a.severity}`;
   el.innerHTML = `<span class="fade" style="display:contents"><span class="sev">${a.severity.toUpperCase()}${list.length > 1 ? ` ${sitIdx % list.length + 1}/${list.length}` : ""}</span><span class="what">${esc(a.title)}</span>${nums}<span class="dec">${dec}</span></span>`;
   el.onclick = () => { S.openAlert = a.id; renderAlerts(); if (a.crew) selectCrew(a.crew, false); };

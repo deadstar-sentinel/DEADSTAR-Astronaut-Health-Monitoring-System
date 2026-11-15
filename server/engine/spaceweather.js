@@ -33,7 +33,7 @@ async function getJson(url, timeoutMs = 6000) {
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": "DEADSTAR-SENTINEL/1.0" },
+      headers: { Accept: "application/json", "User-Agent": "DEADSTAR-LIFELINE/1.0" },
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -1,8 +1,8 @@
-# NASA data and evidence used by SENTINEL
+# NASA data and evidence used by LIFELINE
 
 Every constant lives with its source in `app/engine/constants.py`.
 
-| Source | What it gives | How SENTINEL uses it |
+| Source | What it gives | How LIFELINE uses it |
 |---|---|---|
 | [NASA HRP — Human Health and Performance Risks](https://www.nasa.gov/hrp/risks/) | The 17 official risks | Risk taxonomy; every alert links to NASA's page |
 | [NASA HRP — Ongoing Research](https://www.nasa.gov/hrp/ongoing-hrp-research/) | ARCHeR actigraphy, Standard Measures, B-Complex, Thigh Cuff, CIPHER | Data schema (wrist actigraphy, standard measures) and countermeasures in the what-if panel |

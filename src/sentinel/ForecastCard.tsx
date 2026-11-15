@@ -87,7 +87,7 @@ export function ForecastCard({ organId }: { organId: AnatomyId }) {
     <div data-testid="forecast-card" key={`${crewId}:${link.signal}:${missionId}`} className="sx-rise border border-cyan-400/30 bg-[#051327] shadow-[0_0_30px_rgba(0,140,255,0.12)]">
       <div className="flex items-center justify-between px-3 pt-2.5">
         <span className="text-[10px] font-mono uppercase tracking-[0.14em] text-cyan-300">
-          SENTINEL forecast · {crew?.name ?? crewId}
+          LIFELINE forecast · {crew?.name ?? crewId}
         </span>
         {organ && <span className={`px-2 py-0.5 text-[10px] font-mono tracking-wider border ${st.text} ${st.border} ${st.bg}`}>{st.label}</span>}
       </div>

@@ -122,7 +122,7 @@ export const PROTOCOLS = {
       "Saliva swab for viral reactivation (latent-virus panel in the medical kit).",
       "Move high-workload tasks off this crew member for 24 hours.",
       "If temperature reaches 38.0 °C: crew medical officer decides on an antipyretic from the kit.",
-      "SENTINEL re-forecasts every hour and sends a compressed report to Earth.",
+      "LIFELINE re-forecasts every hour and sends a compressed report to Earth.",
     ],
   },
   fatigue: {
@@ -151,7 +151,7 @@ export const PROTOCOLS = {
       "Raise resistive exercise loading for the next 14 days.",
       "Check vitamin D and calcium intake in the food log.",
       "Ask the flight surgeon about a bisphosphonate (next Earth packet).",
-      "SENTINEL updates the end-of-mission forecast weekly.",
+      "LIFELINE updates the end-of-mission forecast weekly.",
     ],
   },
   co2: {
@@ -171,7 +171,7 @@ export const PROTOCOLS = {
       "Wear active dosimeters; log arrival times.",
       "Postpone any EVA and close outer hatches.",
       "Stay sheltered until the dose rate falls below 5× background.",
-      "SENTINEL logs the event dose against each career limit.",
+      "LIFELINE logs the event dose against each career limit.",
     ],
   },
 };
@@ -179,14 +179,14 @@ export const PROTOCOLS = {
 export const GUIDED_EXAMS = {
   ocular_ultrasound: {
     title: "Guided self-exam: optic nerve ultrasound",
-    kit: ["Portable ultrasound with linear probe", "Ultrasound gel", "Eye shield / closed-eyelid pad", "Tablet with SENTINEL"],
+    kit: ["Portable ultrasound with linear probe", "Ultrasound gel", "Eye shield / closed-eyelid pad", "Tablet with LIFELINE"],
     steps: [
       { say: "Sit with your feet in the foot loops and your head against the rest. Close the eye you will scan.", region: "head" },
       { say: "Put a thick layer of gel on the closed upper eyelid. Do not press on the eye.", region: "eyes" },
       { say: "Hold the probe across the eyelid, marker pointing to your nose. Rest your little finger on your cheekbone to steady it.", region: "eyes" },
       { say: "Tilt the probe slowly until the dark band of the optic nerve appears behind the eye, straight down the screen.", region: "eyes" },
       { say: "Freeze the image. Measure the sheath width 3 millimetres behind the eye.", region: "eyes" },
-      { say: "Repeat twice and on the other eye. SENTINEL averages the readings and updates your forecast.", region: "eyes" },
+      { say: "Repeat twice and on the other eye. LIFELINE averages the readings and updates your forecast.", region: "eyes" },
     ],
   },
 };

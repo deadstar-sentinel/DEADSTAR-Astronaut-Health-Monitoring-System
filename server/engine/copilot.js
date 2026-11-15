@@ -211,7 +211,7 @@ export async function llm_answer(q, st, focus) {
     }),
   };
   const system =
-    "You are SENTINEL, the onboard AI medical officer of a crewed spacecraft. Answer in 2-4 short spoken " +
+    "You are LIFELINE, the onboard AI medical officer of a crewed spacecraft. Answer in 2-4 short spoken " +
     "sentences, flight-controller style, using only the numbers in the JSON snapshot. You provide decision " +
     "support, not diagnoses. If the snapshot does not contain the answer, say so.";
   const body = {
