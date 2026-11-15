@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronRight, Mic, X } from "lucide-react";
 import { sfx } from "../utils/sound.ts";
-import { listenOnce, listeningSupported, speak } from "../utils/narrator.ts";
+import { listenOnce, listeningSupported, speakIfRecorded } from "../utils/narrator.ts";
 
 /** Turn console output into one or two warm spoken sentences. */
 function spokenReply(lines: ConsoleLine[]): string {
@@ -93,7 +93,9 @@ export function CommandConsole({ open, onClose, onRun, scope, chips, accent }: P
     const out = onRun(t);
     const echo: ConsoleLine = { kind: "cmd", text: spoken ? `🎙 ${t}` : t };
     setLines((l) => [...l, echo, ...out].slice(-160));
-    if (spoken) void speak(spokenReply(out));
+    // Replies are spoken only when a recorded (Sonia) line exists; live text would fall back to the
+    // robotic browser voice, so it stays on screen instead of clashing with the narrator.
+    if (spoken) void speakIfRecorded(spokenReply(out));
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {

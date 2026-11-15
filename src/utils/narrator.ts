@@ -203,6 +203,11 @@ async function recordedUrl(text: string): Promise<string | null> {
   return f ? `/narration/${f}` : null;
 }
 
+/** Speak only if this exact line has a recorded file (keeps one consistent voice). */
+export async function speakIfRecorded(text: string): Promise<void> {
+  if (await recordedUrl(text)) return speak(text);
+}
+
 /** Speak a line: recorded narration first, then a server neural voice, then the browser voice. */
 export async function speak(text: string): Promise<void> {
   if (!text.trim()) return;
