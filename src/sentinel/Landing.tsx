@@ -403,7 +403,11 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
               <Scene i={4} side="right">
                 <div className="rv"><Kicker>04 · The proof</Kicker></div>
                 <h2 className="rv mt-3 text-3xl sm:text-5xl font-semibold leading-tight">Built on NASA science. Graded on its own record.</h2>
-                <div className="mt-8 grid grid-cols-2 gap-3 [perspective:900px]">
+                <p className="rv mt-4 text-base text-slate-300 max-w-xl">
+                  Built on live NASA/NOAA space-weather and JPL orbit data, with physiology calibrated to published NASA
+                  findings. Crew data is simulated.
+                </p>
+                <div className="mt-6 grid grid-cols-2 gap-3 [perspective:900px]">
                   {[
                     ["n-risks", "NASA HRP risks modelled", "Human Research Program"],
                     ["n-sig", "signals forecast", "hourly and daily, 80/95 % bands"],
